@@ -1,9 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
-using System.Linq;
 
 using InoIPC;
 
@@ -198,6 +198,16 @@ namespace MonoDebug
       private static string Enable(DebugContext context, List<string> args)
       {
          string name = args.Count > 0 ? args[0] : "";
+
+         if (!context.Profiles.Exists(name))
+         {
+            return IpcResponse.Error
+            (
+               Constants.Error.NotFound,
+               $"Profile '{name}' not found."
+            ).RawJson;
+         }
+
          context.Profiles.Enable(name);
          ApplyProfileState(context);
          return IpcResponse.Success($"Enabled profile '{name}'.").RawJson;
@@ -210,17 +220,25 @@ namespace MonoDebug
       // ------------------------------------------------------------
       private static string Disable(DebugContext context, List<string> args, Dictionary<string, JsonElement> optionals)
       {
-         string name = args.Count > 0 ? args[0] : "";
-
          if (optionals.Has("all"))
          {
             context.Profiles.DisableAll();
-         }
-         else
-         {
-            context.Profiles.Disable(name);
+            ApplyProfileState(context);
+            return IpcResponse.Success("Disabled all profiles.").RawJson;
          }
 
+         string name = args.Count > 0 ? args[0] : "";
+
+         if (!context.Profiles.Exists(name))
+         {
+            return IpcResponse.Error
+            (
+               Constants.Error.NotFound,
+               $"Profile '{name}' not found."
+            ).RawJson;
+         }
+
+         context.Profiles.Disable(name);
          ApplyProfileState(context);
          return IpcResponse.Success($"Disabled profile '{name}'.").RawJson;
       }
@@ -250,12 +268,24 @@ namespace MonoDebug
       // ------------------------------------------------------------
       private static string Info(DebugContext context, List<string> args)
       {
-         string name = args.Count > 0 ? args[0] : "";
+         if (args.Count == 0)
+         {
+            return IpcResponse.Error
+            (
+               Constants.Error.InvalidArgs, "Profile name required."
+            ).RawJson;
+         }
+
+         string name = args[0];
          var    prof = context.Profiles.Get(name);
 
          if (prof == null)
          {
-            return IpcResponse.Error(Constants.Error.NotFound, $"Profile '{name}' not found.").RawJson;
+            return IpcResponse.Error
+            (
+               Constants.Error.NotFound,
+               $"Profile '{name}' not found."
+            ).RawJson;
          }
 
          var bps = prof.BreakPoints.Values.Select(b => b.ToDict()).ToList();

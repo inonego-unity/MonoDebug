@@ -186,9 +186,10 @@ monodebug detach
 ## 빌드
 
 ```bash
-cd cli
-dotnet build
-dotnet run -- attach 56400
+git clone --recursive https://github.com/inonego-unity/MonoDebug.git
+cd MonoDebug
+dotnet publish cli/monodebug.csproj -c Release -o out
+dotnet test test/MonoDebug.TEST.csproj
 ```
 
 ## 의존성

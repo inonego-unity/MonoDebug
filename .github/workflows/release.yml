@@ -1,0 +1,38 @@
+name: Release CLI
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: 8.0.x
+
+    - name: Test
+      run: dotnet test test/MonoDebug.TEST.csproj -c Release --no-restore
+
+    - name: Publish
+      run: dotnet publish cli/monodebug.csproj -c Release -o cli/bin/publish
+
+    - name: Zip
+      run: Compress-Archive -Path cli/bin/publish/* -DestinationPath monodebug-windows-x64.zip
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: monodebug-windows-x64.zip
+        generate_release_notes: true

@@ -192,27 +192,50 @@ namespace MonoDebug
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Removes all debug points. Returns removed count.
+      /// Removes all breakpoints. Returns removed count.
       /// </summary>
       // ------------------------------------------------------------
-      public int RemoveAll()
+      public int RemoveAllBreakPoints()
       {
-         int count = BreakPoints.Count + CatchPoints.Count;
+         int count = BreakPoints.Count;
 
          foreach (var bp in BreakPoints.Values)
          {
             bp.Request?.Disable();
          }
 
+         BreakPoints.Clear();
+
+         return count;
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Removes all catchpoints. Returns removed count.
+      /// </summary>
+      // ------------------------------------------------------------
+      public int RemoveAllCatchPoints()
+      {
+         int count = CatchPoints.Count;
+
          foreach (var cp in CatchPoints.Values)
          {
             cp.Request?.Disable();
          }
 
-         BreakPoints.Clear();
          CatchPoints.Clear();
 
          return count;
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Removes all debug points. Returns removed count.
+      /// </summary>
+      // ------------------------------------------------------------
+      public int RemoveAll()
+      {
+         return RemoveAllBreakPoints() + RemoveAllCatchPoints();
       }
 
       // ------------------------------------------------------------

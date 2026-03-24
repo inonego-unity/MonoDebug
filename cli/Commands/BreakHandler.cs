@@ -44,7 +44,7 @@ namespace MonoDebug
 
                   foreach (var profile in context.Profiles.List())
                   {
-                     count += profile.RemoveAll();
+                     count += profile.RemoveAllBreakPoints();
                   }
 
                   return IpcResponse.Success($"Removed {count} breakpoints.").RawJson;
@@ -248,7 +248,7 @@ namespace MonoDebug
 
                   foreach (var profile in context.Profiles.List())
                   {
-                     count += profile.RemoveAll();
+                     count += profile.RemoveAllCatchPoints();
                   }
 
                   return IpcResponse.Success($"Removed {count} catchpoints.").RawJson;

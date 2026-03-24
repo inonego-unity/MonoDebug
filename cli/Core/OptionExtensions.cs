@@ -38,6 +38,23 @@ namespace MonoDebug
 
       // ------------------------------------------------------------
       /// <summary>
+      /// Unwraps a JsonElement that may be an array (from InoCLI
+      /// List&lt;string&gt; optionals) to a single element.
+      /// </summary>
+      // ------------------------------------------------------------
+      private static JsonElement Unwrap(JsonElement el)
+      {
+         if (el.ValueKind == JsonValueKind.Array
+            && el.GetArrayLength() > 0)
+         {
+            return el[0];
+         }
+
+         return el;
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
       /// Gets a string value, or fallback if missing.
       /// </summary>
       // ------------------------------------------------------------
@@ -49,7 +66,7 @@ namespace MonoDebug
       {
          if (optionals.TryGetValue(key, out var el))
          {
-            return JsonHelper.GetString(el, fallback);
+            return JsonHelper.GetString(Unwrap(el), fallback);
          }
 
          return fallback;
@@ -68,7 +85,7 @@ namespace MonoDebug
       {
          if (optionals.TryGetValue(key, out var el))
          {
-            return JsonHelper.GetInt(el, fallback);
+            return JsonHelper.GetInt(Unwrap(el), fallback);
          }
 
          return fallback;
@@ -87,7 +104,7 @@ namespace MonoDebug
       {
          if (optionals.TryGetValue(key, out var el))
          {
-            return JsonHelper.GetLong(el, fallback);
+            return JsonHelper.GetLong(Unwrap(el), fallback);
          }
 
          return fallback;
@@ -106,7 +123,7 @@ namespace MonoDebug
       {
          if (optionals.TryGetValue(key, out var el))
          {
-            return JsonHelper.GetBool(el, fallback);
+            return JsonHelper.GetBool(Unwrap(el), fallback);
          }
 
          return fallback;

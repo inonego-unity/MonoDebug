@@ -1,3 +1,9 @@
 [submodule "lib/debugger-libs"]
 	path = lib/debugger-libs
 	url = https://github.com/mono/debugger-libs.git
+[submodule "lib/InoCLI"]
+	path = lib/InoCLI
+	url = https://github.com/inonego/InoCLI.git
+[submodule "lib/InoIPC"]
+	path = lib/InoIPC
+	url = https://github.com/inonego/InoIPC.git

@@ -15,8 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\lib\debugger-libs\Mono.Debugger.Soft\Mono.Debugger.Soft.csproj" />
-    <ProjectReference Include="..\..\..\InoCLI\src\InoCLI.csproj" />
-    <ProjectReference Include="..\..\..\InoIPC\src\InoIPC\InoIPC.csproj" />
+    <ProjectReference Include="..\lib\InoCLI\src\InoCLI.csproj" />
+    <ProjectReference Include="..\lib\InoIPC\src\InoIPC\InoIPC.csproj" />
   </ItemGroup>
 
 </Project>

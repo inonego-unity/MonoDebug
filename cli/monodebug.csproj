@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>monodebug</AssemblyName>
+    <RootNamespace>MonoDebug</RootNamespace>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MonoDebug.TEST" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\lib\debugger-libs\Mono.Debugger.Soft\Mono.Debugger.Soft.csproj" />
+    <ProjectReference Include="..\..\..\InoCLI\src\InoCLI.csproj" />
+    <ProjectReference Include="..\..\..\InoIPC\src\InoIPC\InoIPC.csproj" />
+  </ItemGroup>
+
+</Project>

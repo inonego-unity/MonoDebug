@@ -555,27 +555,29 @@ namespace MonoDebug
 
             if (thisObj != null)
             {
-               foreach (var field in thisObj.Type.GetFields())
+               var field = thisObj.Type.GetField(name);
+
+               if (field != null)
                {
-                  if (field.Name == name)
+                  var val = ParseValue
+                  (
+                     vm, field.FieldType, value,
+                     thisObj.Domain
+                  );
+
+                  if (val != null)
                   {
-                     var val = ParseValue(vm, field.FieldType, value);
-
-                     if (val != null)
-                     {
-                        thisObj.SetValue(field, val);
-                        return true;
-                     }
-
-                     return false;
+                     thisObj.SetValue(field, val);
+                     return true;
                   }
                }
             }
 
             return false;
          }
-         catch
+         catch (Exception ex)
          {
+            Console.Error.WriteLine($"SetVariable error: {ex.Message}");
             return false;
          }
       }
@@ -587,7 +589,8 @@ namespace MonoDebug
       // ------------------------------------------------------------
       private static Value ParseValue
       (
-         VirtualMachine vm, TypeMirror type, string value
+         VirtualMachine vm, TypeMirror type, string value,
+         AppDomainMirror context = null
       )
       {
          try
@@ -624,10 +627,19 @@ namespace MonoDebug
 
             if (typeName == "System.String")
             {
+               // Use target object's domain if available
+               if (context != null)
+               {
+                  return context.CreateString(value);
+               }
+
                return vm.RootDomain.CreateString(value);
             }
          }
-         catch { }
+         catch (Exception ex)
+         {
+            Console.Error.WriteLine($"ParseValue error: {ex.Message}");
+         }
 
          return null;
       }

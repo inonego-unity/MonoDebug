@@ -29,28 +29,45 @@ namespace MonoDebug
       // ------------------------------------------------------------
       public static string HandleBreak
       (
-         DebugContext context,
-         string command, List<string> args,
+         DebugContext context, List<string> args,
          Dictionary<string, JsonElement> optionals
       )
       {
+         string command = args.Count > 0 ? args[0] : "";
+         var    rest    = args.Count > 1
+            ? args.GetRange(1, args.Count - 1)
+            : new List<string>();
+
          switch (command)
          {
             case "remove":
             {
                if (optionals.Has("all"))
                {
-                  int count = 0;
+                  string profileName = optionals.GetString("profile");
+                  int    count       = 0;
 
-                  foreach (var profile in context.Profiles.List())
+                  if (!string.IsNullOrEmpty(profileName))
                   {
-                     count += profile.RemoveAllBreakPoints();
+                     var profile = context.Profiles.Get(profileName);
+
+                     if (profile != null)
+                     {
+                        count = profile.RemoveAllBreakPoints();
+                     }
+                  }
+                  else
+                  {
+                     foreach (var profile in context.Profiles.List())
+                     {
+                        count += profile.RemoveAllBreakPoints();
+                     }
                   }
 
                   return IpcResponse.Success($"Removed {count} breakpoints.").RawJson;
                }
 
-               if (!args.TryParseId(out int id))
+               if (!rest.TryParseId(out int id))
                {
                   return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
                }
@@ -87,7 +104,7 @@ namespace MonoDebug
 
             case "enable":
             {
-               if (!args.TryParseId(out int id))
+               if (!rest.TryParseId(out int id))
                {
                   return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
                }
@@ -105,7 +122,7 @@ namespace MonoDebug
 
             case "disable":
             {
-               if (!args.TryParseId(out int id))
+               if (!rest.TryParseId(out int id))
                {
                   return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
                }
@@ -122,7 +139,7 @@ namespace MonoDebug
             }
 
             case "set":
-               return SetBreakpoint(context, args, optionals);
+               return SetBreakpoint(context, rest, optionals);
 
             default:
             {
@@ -233,28 +250,45 @@ namespace MonoDebug
       // ------------------------------------------------------------
       public static string HandleCatch
       (
-         DebugContext context,
-         string command, List<string> args,
+         DebugContext context, List<string> args,
          Dictionary<string, JsonElement> optionals
       )
       {
+         string command = args.Count > 0 ? args[0] : "";
+         var    rest    = args.Count > 1
+            ? args.GetRange(1, args.Count - 1)
+            : new List<string>();
+
          switch (command)
          {
             case "remove":
             {
                if (optionals.Has("all"))
                {
-                  int count = 0;
+                  string profileName = optionals.GetString("profile");
+                  int    count       = 0;
 
-                  foreach (var profile in context.Profiles.List())
+                  if (!string.IsNullOrEmpty(profileName))
                   {
-                     count += profile.RemoveAllCatchPoints();
+                     var profile = context.Profiles.Get(profileName);
+
+                     if (profile != null)
+                     {
+                        count = profile.RemoveAllCatchPoints();
+                     }
+                  }
+                  else
+                  {
+                     foreach (var profile in context.Profiles.List())
+                     {
+                        count += profile.RemoveAllCatchPoints();
+                     }
                   }
 
                   return IpcResponse.Success($"Removed {count} catchpoints.").RawJson;
                }
 
-               if (!args.TryParseId(out int id))
+               if (!rest.TryParseId(out int id))
                {
                   return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
                }
@@ -278,7 +312,7 @@ namespace MonoDebug
 
             case "enable":
             {
-               if (!args.TryParseId(out int id))
+               if (!rest.TryParseId(out int id))
                {
                   return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
                }
@@ -296,7 +330,7 @@ namespace MonoDebug
 
             case "disable":
             {
-               if (!args.TryParseId(out int id))
+               if (!rest.TryParseId(out int id))
                {
                   return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
                }
@@ -329,7 +363,7 @@ namespace MonoDebug
             }
 
             case "set":
-               return SetCatchpoint(context, args, optionals);
+               return SetCatchpoint(context, rest, optionals);
 
             default:
             {

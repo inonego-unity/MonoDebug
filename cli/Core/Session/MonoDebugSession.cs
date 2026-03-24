@@ -383,6 +383,257 @@ namespace MonoDebug
 
    #endregion
 
+   #region Set IP
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Sets the instruction pointer to file:line on the stopped
+      /// thread. Returns true on success.
+      /// </summary>
+      // ------------------------------------------------------------
+      public bool SetIP(string file, int line)
+      {
+         if (StoppedThread == null || vm == null)
+         {
+            return false;
+         }
+
+         var location = DebugProfile.ResolveLocation(vm, file, line);
+
+         if (location == null)
+         {
+            return false;
+         }
+
+         try
+         {
+            StoppedThread.SetIP(location);
+            return true;
+         }
+         catch
+         {
+            return false;
+         }
+      }
+
+   #endregion
+
+   #region Static Fields
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Gets static fields of a type by name.
+      /// </summary>
+      // ------------------------------------------------------------
+      public Dictionary<string, object> GetStaticFields(string typeName)
+      {
+         if (vm == null)
+         {
+            return null;
+         }
+
+         try
+         {
+            var types = vm.GetTypes(typeName, false);
+
+            if (types.Count == 0)
+            {
+               // Try partial match
+               types = vm.GetTypes(typeName, true);
+            }
+
+            if (types.Count == 0)
+            {
+               return null;
+            }
+
+            var type   = types[0];
+            var result = new Dictionary<string, object>();
+
+            foreach (var field in type.GetFields())
+            {
+               if (!field.IsStatic)
+               {
+                  continue;
+               }
+
+               try
+               {
+                  var val = type.GetValue(field);
+                  result[field.Name] = ValueFormatter.Format(val, 1);
+               }
+               catch
+               {
+                  result[field.Name] = "(error)";
+               }
+            }
+
+            return result;
+         }
+         catch
+         {
+            return null;
+         }
+      }
+
+   #endregion
+
+   #region Set Variable
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Sets a local variable or field value in the current frame.
+      /// Supports primitives (int, float, string, bool).
+      /// </summary>
+      // ------------------------------------------------------------
+      public bool SetVariable
+      (
+         long threadId, int frameIndex,
+         string name, string value
+      )
+      {
+         try
+         {
+            var thread = ResolveThread(threadId);
+
+            if (thread == null)
+            {
+               return false;
+            }
+
+            var frames = thread.GetFrames();
+
+            if (frameIndex >= frames.Length)
+            {
+               return false;
+            }
+
+            var frame  = frames[frameIndex];
+            var method = frame.Method;
+
+            // Try locals
+            foreach (var local in method.GetLocals())
+            {
+               if (local.Name == name)
+               {
+                  var val = ParseValue(vm, local.Type, value);
+
+                  if (val != null)
+                  {
+                     frame.SetValue(local, val);
+                     return true;
+                  }
+
+                  return false;
+               }
+            }
+
+            // Try parameters
+            var parameters = method.GetParameters();
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+               if (parameters[i].Name == name)
+               {
+                  var val = ParseValue
+                  (
+                     vm, parameters[i].ParameterType, value
+                  );
+
+                  if (val != null)
+                  {
+                     frame.SetValue(parameters[i], val);
+                     return true;
+                  }
+
+                  return false;
+               }
+            }
+
+            // Try this fields
+            var thisObj = frame.GetThis() as ObjectMirror;
+
+            if (thisObj != null)
+            {
+               foreach (var field in thisObj.Type.GetFields())
+               {
+                  if (field.Name == name)
+                  {
+                     var val = ParseValue(vm, field.FieldType, value);
+
+                     if (val != null)
+                     {
+                        thisObj.SetValue(field, val);
+                        return true;
+                     }
+
+                     return false;
+                  }
+               }
+            }
+
+            return false;
+         }
+         catch
+         {
+            return false;
+         }
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Parses a string value into a SDB Value based on type.
+      /// </summary>
+      // ------------------------------------------------------------
+      private static Value ParseValue
+      (
+         VirtualMachine vm, TypeMirror type, string value
+      )
+      {
+         try
+         {
+            string typeName = type.FullName;
+
+            if (typeName == "System.Int32" && int.TryParse(value, out int i))
+            {
+               return vm.CreateValue(i);
+            }
+
+            if (typeName == "System.Single" && float.TryParse(value, out float f))
+            {
+               return vm.CreateValue(f);
+            }
+
+            if (typeName == "System.Double" && double.TryParse(value, out double d))
+            {
+               return vm.CreateValue(d);
+            }
+
+            if (typeName == "System.Boolean")
+            {
+               if (bool.TryParse(value, out bool b))
+               {
+                  return vm.CreateValue(b);
+               }
+            }
+
+            if (typeName == "System.Int64" && long.TryParse(value, out long l))
+            {
+               return vm.CreateValue(l);
+            }
+
+            if (typeName == "System.String")
+            {
+               return vm.RootDomain.CreateString(value);
+            }
+         }
+         catch { }
+
+         return null;
+      }
+
+   #endregion
+
    #region Exception Info
 
       // ----------------------------------------------------------------------

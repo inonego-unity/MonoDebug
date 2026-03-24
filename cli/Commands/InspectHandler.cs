@@ -31,8 +31,8 @@ namespace MonoDebug.Commands
       // ------------------------------------------------------------
       public static string HandleStack
       (
-         DebugContext context, string command,
-         List<string> args, Dictionary<string, JsonElement> optionals
+         DebugContext context, List<string> args,
+         Dictionary<string, JsonElement> optionals
       )
       {
          if (!context.Session.IsSuspended)
@@ -44,10 +44,15 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
+         string command = args.Count > 0 ? args[0] : "";
+         var    rest    = args.Count > 1
+            ? args.GetRange(1, args.Count - 1)
+            : new List<string>();
+
          // stack frame <n>
          if (command == "frame")
          {
-            if (!args.TryParseId(out int n))
+            if (!rest.TryParseId(out int n))
             {
                return IpcResponse.Error
                (
@@ -107,10 +112,12 @@ namespace MonoDebug.Commands
       // ------------------------------------------------------------
       public static string HandleThread
       (
-         DebugContext context, string command,
-         List<string> args, Dictionary<string, JsonElement> optionals
+         DebugContext context, List<string> args,
+         Dictionary<string, JsonElement> optionals
       )
       {
+         string command = args.Count > 0 ? args[0] : "";
+
          // thread list
          if (command == "list")
          {
@@ -118,7 +125,7 @@ namespace MonoDebug.Commands
          }
 
          // thread <id> : switch thread
-         if (args.Count == 0 || !long.TryParse(args[0], out long tid))
+         if (!long.TryParse(command, out long tid))
          {
             return IpcResponse.Error
             (
@@ -146,8 +153,8 @@ namespace MonoDebug.Commands
       // -----------------------------------------------------------------------
       public static string HandleVars
       (
-         DebugContext context, string command,
-         List<string> args, Dictionary<string, JsonElement> optionals
+         DebugContext context, List<string> args,
+         Dictionary<string, JsonElement> optionals
       )
       {
          if (!context.Session.IsSuspended)
@@ -159,23 +166,78 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
+         string command = args.Count > 0 ? args[0] : "";
+
          // vars set <var> <value>
          if (command == "set")
          {
-            return IpcResponse.Error
+            var rest = args.Count > 1
+               ? args.GetRange(1, args.Count - 1)
+               : new List<string>();
+
+            if (rest.Count < 2)
+            {
+               return IpcResponse.Error
+               (
+                  Constants.Error.InvalidArgs,
+                  "Usage: vars set <name> <value>"
+               ).RawJson;
+            }
+
+            string name  = rest[0];
+            string value = rest[1];
+
+            if (!context.Session.SetVariable
             (
-               Constants.Error.InvalidArgs,
-               "vars set not yet implemented."
+               context.CurrentThreadId, context.CurrentFrame,
+               name, value
+            ))
+            {
+               return IpcResponse.Error
+               (
+                  Constants.Error.EvalError,
+                  $"Cannot set '{name}' to '{value}'."
+               ).RawJson;
+            }
+
+            return IpcResponse.Success
+            (
+               $"Set {name} = {value}."
             ).RawJson;
          }
 
          // --static '<type>' : static field inspection
          if (optionals.Has("static"))
          {
-            return IpcResponse.Error
+            string typeName = optionals.GetString("static");
+
+            if (string.IsNullOrEmpty(typeName))
+            {
+               return IpcResponse.Error
+               (
+                  Constants.Error.InvalidArgs,
+                  "Type name required. Use: vars --static '<type>'"
+               ).RawJson;
+            }
+
+            var fields = context.Session.GetStaticFields(typeName);
+
+            if (fields == null)
+            {
+               return IpcResponse.Error
+               (
+                  Constants.Error.InvalidArgs,
+                  $"Type '{typeName}' not found."
+               ).RawJson;
+            }
+
+            return IpcResponse.Success
             (
-               Constants.Error.InvalidArgs,
-               "vars --static not yet implemented."
+               new Dictionary<string, object>
+               {
+                  ["type"]   = typeName,
+                  ["fields"] = fields
+               }
             ).RawJson;
          }
 
@@ -233,8 +295,8 @@ namespace MonoDebug.Commands
       // ------------------------------------------------------------
       public static string HandleEval
       (
-         DebugContext context, string command,
-         List<string> args, Dictionary<string, JsonElement> optionals
+         DebugContext context, List<string> args,
+         Dictionary<string, JsonElement> optionals
       )
       {
          if (!context.Session.IsSuspended)
@@ -246,7 +308,9 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
-         if (args.Count == 0)
+         string expression = string.Join(" ", args).Trim();
+
+         if (string.IsNullOrEmpty(expression))
          {
             return IpcResponse.Error
             (
@@ -254,8 +318,6 @@ namespace MonoDebug.Commands
                "Expression required. Use: eval '<expr>'"
             ).RawJson;
          }
-
-         string expression = args[0];
          var    value      = context.Session.Evaluate
          (
             context.CurrentThreadId, context.CurrentFrame, expression
@@ -270,19 +332,11 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
-         var result = new Dictionary<string, object>
+         return IpcResponse.Success(new Dictionary<string, object>
          {
             ["expression"] = expression,
             ["value"]      = value
-         };
-
-         // --range start count : slice collection results
-         if (optionals.Has("range"))
-         {
-            result["range"] = "not yet implemented";
-         }
-
-         return IpcResponse.Success(result).RawJson;
+         }).RawJson;
       }
 
    #endregion

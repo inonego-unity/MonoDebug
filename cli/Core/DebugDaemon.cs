@@ -218,10 +218,9 @@ namespace MonoDebug
             }
          }
 
-         string group   = positionals.Count > 0 ? positionals[0] : "";
-         string command = positionals.Count > 1 ? positionals[1] : "";
-         var    args    = positionals.Count > 2
-            ? positionals.GetRange(2, positionals.Count - 2)
+         string group = positionals.Count > 0 ? positionals[0] : "";
+         var    args  = positionals.Count > 1
+            ? positionals.GetRange(1, positionals.Count - 1)
             : new List<string>();
 
          switch (group)
@@ -246,7 +245,7 @@ namespace MonoDebug
             {
                return FlowHandler.Handle
                (
-                  context, command, args, optionals
+                  context, args, optionals
                );
             }
 
@@ -254,7 +253,7 @@ namespace MonoDebug
             {
                return InspectHandler.HandleStack
                (
-                  context, command, args, optionals
+                  context, args, optionals
                );
             }
 
@@ -262,7 +261,7 @@ namespace MonoDebug
             {
                return InspectHandler.HandleThread
                (
-                  context, command, args, optionals
+                  context, args, optionals
                );
             }
 
@@ -270,7 +269,7 @@ namespace MonoDebug
             {
                return InspectHandler.HandleVars
                (
-                  context, command, args, optionals
+                  context, args, optionals
                );
             }
 
@@ -278,7 +277,7 @@ namespace MonoDebug
             {
                return InspectHandler.HandleEval
                (
-                  context, command, args, optionals
+                  context, args, optionals
                );
             }
 
@@ -286,7 +285,7 @@ namespace MonoDebug
             {
                return BreakHandler.HandleBreak
                (
-                  context, command, args, optionals
+                  context, args, optionals
                );
             }
 
@@ -294,7 +293,7 @@ namespace MonoDebug
             {
                return BreakHandler.HandleCatch
                (
-                  context, command, args, optionals
+                  context, args, optionals
                );
             }
 
@@ -302,7 +301,7 @@ namespace MonoDebug
             {
                return ProfileHandler.Handle
                (
-                  context, command, args, optionals
+                  context, args, optionals
                );
             }
 

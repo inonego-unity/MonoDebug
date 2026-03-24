@@ -463,7 +463,7 @@ namespace MonoDebug
       /// Resolves file:line to a Mono.Debugger.Soft Location.
       /// </summary>
       // ------------------------------------------------------------
-      private static Location ResolveLocation
+      internal static Location ResolveLocation
       (
          VirtualMachine vm, string file, int line
       )

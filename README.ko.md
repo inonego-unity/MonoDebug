@@ -106,6 +106,7 @@ monodebug detach
 | `flow step [--count N]` | Step into |
 | `flow out [--count N]` | Step out |
 | `flow until [file] <line>` | 특정 줄까지 실행 |
+| `flow goto [file] <line>` | 명령 포인터 이동 |
 | `flow pause` | VM 일시 정지 |
 
 ### 브레이크포인트
@@ -113,7 +114,7 @@ monodebug detach
 | 명령 | 설명 |
 |------|------|
 | `break set <file> <line> [옵션]` | BP 설정 |
-| `break remove <id> [--all]` | BP 제거 |
+| `break remove <id> [--all] [--profile]` | BP 제거 |
 | `break list [--profile <name>]` | BP 목록 |
 | `break enable <id>` | BP 활성화 |
 | `break disable <id>` | BP 비활성화 |
@@ -125,7 +126,7 @@ monodebug detach
 | 명령 | 설명 |
 |------|------|
 | `catch set <type> [옵션]` | 예외에서 중단 |
-| `catch remove <id> [--all]` | 캐치포인트 제거 |
+| `catch remove <id> [--all] [--profile]` | 캐치포인트 제거 |
 | `catch list` | 캐치포인트 목록 |
 | `catch enable <id>` | 캐치포인트 활성화 |
 | `catch disable <id>` | 캐치포인트 비활성화 |
@@ -142,6 +143,8 @@ monodebug detach
 | `thread list` | 스레드 목록 |
 | `thread <id>` | 스레드 전환 |
 | `vars [--depth N]` | 변수 조회 (this/args/locals) |
+| `vars set <name> <value>` | 변수 값 설정 |
+| `vars --static '<type>'` | 정적 필드 조회 |
 | `eval '<expr>'` | 표현식 평가 |
 
 ### 프로필

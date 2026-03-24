@@ -106,6 +106,7 @@ monodebug detach
 | `flow step [--count N]` | Step into |
 | `flow out [--count N]` | Step out |
 | `flow until [file] <line>` | Run to line |
+| `flow goto [file] <line>` | Set instruction pointer |
 | `flow pause` | Suspend VM |
 
 ### Breakpoints
@@ -113,7 +114,7 @@ monodebug detach
 | Command | Description |
 |---------|-------------|
 | `break set <file> <line> [options]` | Set breakpoint |
-| `break remove <id> [--all]` | Remove breakpoint |
+| `break remove <id> [--all] [--profile]` | Remove breakpoint |
 | `break list [--profile <name>]` | List breakpoints |
 | `break enable <id>` | Enable breakpoint |
 | `break disable <id>` | Disable breakpoint |
@@ -125,7 +126,7 @@ Options: `--condition '<expr>'`, `--hit-count N`, `--thread <id>`, `--temp`, `--
 | Command | Description |
 |---------|-------------|
 | `catch set <type> [options]` | Break on exception |
-| `catch remove <id> [--all]` | Remove catchpoint |
+| `catch remove <id> [--all] [--profile]` | Remove catchpoint |
 | `catch list` | List catchpoints |
 | `catch enable <id>` | Enable catchpoint |
 | `catch disable <id>` | Disable catchpoint |
@@ -142,6 +143,8 @@ Options: `--all`, `--unhandled`, `--condition`, `--profile`
 | `thread list` | List threads |
 | `thread <id>` | Switch thread |
 | `vars [--depth N]` | View variables (this/args/locals) |
+| `vars set <name> <value>` | Set variable value |
+| `vars --static '<type>'` | View static fields |
 | `eval '<expr>'` | Evaluate expression |
 
 ### Profiles

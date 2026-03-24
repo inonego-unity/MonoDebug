@@ -27,42 +27,45 @@ namespace MonoDebug
       // ------------------------------------------------------------
       public static string Handle
       (
-         DebugContext context,
-         string command,
-         List<string> args,
+         DebugContext context, List<string> args,
          Dictionary<string, JsonElement> optionals
       )
       {
+         string command = args.Count > 0 ? args[0] : "";
+         var    rest    = args.Count > 1
+            ? args.GetRange(1, args.Count - 1)
+            : new List<string>();
+
          switch (command)
          {
             case "create":
             {
-               return Create(context, args, optionals);
+               return Create(context, rest, optionals);
             }
 
             case "remove":
             {
-               return Remove(context, args);
+               return Remove(context, rest);
             }
 
             case "edit":
             {
-               return Edit(context, args, optionals);
+               return Edit(context, rest, optionals);
             }
 
             case "switch":
             {
-               return Switch(context, args);
+               return Switch(context, rest);
             }
 
             case "enable":
             {
-               return Enable(context, args);
+               return Enable(context, rest);
             }
 
             case "disable":
             {
-               return Disable(context, args, optionals);
+               return Disable(context, rest, optionals);
             }
 
             case "list":
@@ -72,7 +75,7 @@ namespace MonoDebug
 
             case "info":
             {
-               return Info(context, args);
+               return Info(context, rest);
             }
 
             default:

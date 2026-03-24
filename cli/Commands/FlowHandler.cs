@@ -28,11 +28,15 @@ namespace MonoDebug
       // ------------------------------------------------------------
       public static string Handle
       (
-         DebugContext context,
-         string command, List<string> args,
+         DebugContext context, List<string> args,
          Dictionary<string, JsonElement> optionals
       )
       {
+         string command = args.Count > 0 ? args[0] : "";
+         var    rest    = args.Count > 1
+            ? args.GetRange(1, args.Count - 1)
+            : new List<string>();
+
          switch (command)
          {
             case "wait":
@@ -54,12 +58,12 @@ namespace MonoDebug
 
             case "until":
             {
-               return HandleUntil(context, args);
+               return HandleUntil(context, rest);
             }
 
             case "goto":
             {
-               return HandleGoto(context);
+               return HandleGoto(context, rest);
             }
 
             case "pause":
@@ -301,10 +305,12 @@ namespace MonoDebug
       // ------------------------------------------------------------
       /// <summary>
       /// Sets the instruction pointer on the current thread.
-      /// Not yet implemented.
       /// </summary>
       // ------------------------------------------------------------
-      private static string HandleGoto(DebugContext context)
+      private static string HandleGoto
+      (
+         DebugContext context, List<string> args
+      )
       {
          if (!context.Session.IsSuspended)
          {
@@ -314,10 +320,40 @@ namespace MonoDebug
             ).RawJson;
          }
 
-         return IpcResponse.Error
+         string file = "";
+         int    line = 0;
+
+         if (args.Count == 1)
+         {
+            int.TryParse(args[0], out line);
+         }
+         else if (args.Count >= 2)
+         {
+            file = args[0];
+            int.TryParse(args[1], out line);
+         }
+
+         if (line <= 0)
+         {
+            return IpcResponse.Error
+            (
+               Constants.Error.InvalidArgs,
+               "Usage: flow goto [file] <line>"
+            ).RawJson;
+         }
+
+         if (!context.Session.SetIP(file, line))
+         {
+            return IpcResponse.Error
+            (
+               Constants.Error.InvalidArgs,
+               $"Cannot set IP to {file}:{line}"
+            ).RawJson;
+         }
+
+         return IpcResponse.Success
          (
-            Constants.Error.InvalidArgs,
-            "flow goto not yet implemented."
+            $"Set IP to {file}:{line}."
          ).RawJson;
       }
 

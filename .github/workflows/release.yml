@@ -28,7 +28,7 @@ jobs:
     - name: Publish
       run: dotnet publish cli/monodebug.csproj -c Release -o cli/bin/publish
 
-    - name: Copy licenses and skills
+    - name: Copy licenses and docs
       run: |
         Copy-Item LICENSE cli/bin/publish/
         Copy-Item THIRD-PARTY-NOTICES.md cli/bin/publish/

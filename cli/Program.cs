@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 
@@ -56,15 +57,14 @@ namespace MonoDebug
       // ------------------------------------------------------------
       static void PrintHelp()
       {
-         string exeDir   = AppContext.BaseDirectory;
-         string skillDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(exeDir, ".claude", "skills"));
+         string exeDir    = AppContext.BaseDirectory;
+         string claudeMd  = Path.GetFullPath(Path.Combine(exeDir, ".claude", "CLAUDE.md"));
 
          Console.WriteLine
          (
 $@"MonoDebug v{Constants.Version} — Mono SDB Debugger CLI for AI Agents
 
-Load the MonoDebug skill before use: /inonego-monodebug
-Skill path: {skillDir}"
+Reference: {claudeMd}"
          );
       }
 

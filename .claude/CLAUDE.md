@@ -1,9 +1,3 @@
----
-name: inonego-monodebug
-description: Mono SDB debugger CLI. Use when debugging Mono processes — attach, breakpoints, stepping, variable inspection, and more.
-user-invocable: false
----
-
 # MonoDebug
 
 `monodebug <command> [args...] [--options]` — all commands return JSON.
@@ -32,8 +26,9 @@ monodebug stack --full | jq '.frames[0]'
 monodebug thread list | jq '.threads[] | select(.name != "")'
 ```
 
-## Patterns
+## Important
 
+- **Each command must be a separate Bash call.** Do NOT chain monodebug commands with `;` or `&&` in a single Bash call. The event queue between daemon and CLI requires separate process invocations.
 - **Attach before use**: `monodebug attach <port>` must be called first. Use `--profiles <path>` to persist breakpoints.
 - **SDB port**: Found in process launch args (`--debugger-agent=...address=127.0.0.1:<port>`). Changes on process restart.
 - **Event loop**: After attach, consume `vmstart` with `flow wait`, then `flow continue` before breakpoints will hit.

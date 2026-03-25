@@ -442,17 +442,9 @@ namespace MonoDebug
          VirtualMachine vm, string file, int line
       )
       {
-         string fileName = Path.GetFileName(file);
-
          try
          {
-            string typeName = Path.GetFileNameWithoutExtension(fileName);
-            var    types    = vm.GetTypes(typeName, true);
-
-            if (types.Count == 0)
-            {
-               return null;
-            }
+            var types = vm.GetTypesForSourceFile(file, false);
 
             foreach (var type in types)
             {

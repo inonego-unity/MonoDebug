@@ -22,7 +22,7 @@ namespace MonoDebug.TEST
          var bp = new BreakPoint
          {
             Id      = 1,
-            File    = "Test.cs",
+            File    = "/path/to/Test.cs",
             Line    = 42,
             Enabled = true,
             Hits    = 3
@@ -33,7 +33,7 @@ namespace MonoDebug.TEST
          Assert.Equal(1, dict["id"]);
          Assert.Equal(true, dict["enabled"]);
          Assert.Equal(3, dict["hits"]);
-         Assert.Equal("Test.cs", dict["file"]);
+         Assert.Equal("/path/to/Test.cs", dict["file"]);
          Assert.Equal(42, dict["line"]);
       }
 
@@ -43,7 +43,7 @@ namespace MonoDebug.TEST
          var bp = new BreakPoint
          {
             Id      = 1,
-            File    = "Test.cs",
+            File    = "/path/to/Test.cs",
             Line    = 10,
             Enabled = true
          };
@@ -64,7 +64,7 @@ namespace MonoDebug.TEST
          var bp = new BreakPoint
          {
             Id              = 1,
-            File            = "Test.cs",
+            File            = "/path/to/Test.cs",
             Line            = 10,
             Enabled         = true,
             Desc            = "test bp",

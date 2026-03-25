@@ -6,7 +6,7 @@ user-invocable: false
 
 # MonoDebug
 
-`monodebug <group> [command] [args...] [--options]` — all commands return JSON.
+`monodebug <command> [args...] [--options]` — all commands return JSON.
 
 ## Architecture
 
@@ -105,7 +105,7 @@ The `eval` field appears only when the hit BP has `--eval` expressions attached.
 
 Options: `--condition '<expr>'`, `--hit-count N`, `--thread <id>`, `--temp`, `--profile '<name>'`, `--desc '<text>'`, `--eval '<expr>'`
 
-File can be filename only (e.g. `DebugTest.cs`) — resolved by type name match.
+File must be the full source file path as reported by the debugger.
 
 ---
 

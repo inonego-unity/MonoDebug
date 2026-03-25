@@ -28,11 +28,18 @@ jobs:
     - name: Publish
       run: dotnet publish cli/monodebug.csproj -c Release -o cli/bin/publish
 
+    - name: Copy licenses and skills
+      run: |
+        Copy-Item LICENSE cli/bin/publish/
+        Copy-Item THIRD-PARTY-NOTICES.md cli/bin/publish/
+        Copy-Item -Recurse .claude cli/bin/publish/.claude
+
     - name: Zip
       run: Compress-Archive -Path cli/bin/publish/* -DestinationPath monodebug-windows-x64.zip
 
     - name: Create Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v2.3.2
       with:
         files: monodebug-windows-x64.zip
         generate_release_notes: true
+        draft: false

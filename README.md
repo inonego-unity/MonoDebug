@@ -69,7 +69,7 @@ monodebug flow wait --timeout 5000
 monodebug flow continue
 
 # Set a breakpoint and wait for hit
-monodebug break set PlayerController.cs 42
+monodebug break set /path/to/PlayerController.cs 42
 monodebug flow wait --timeout 30000
 
 # Inspect variables
@@ -192,7 +192,7 @@ monodebug eval 'counter > 100 ? "high" : "low"'  # ternary
 
 Conditional breakpoints also use eval:
 ```bash
-monodebug break set Player.cs 42 --condition 'health < 10'
+monodebug break set /path/to/Player.cs 42 --condition 'health < 10'
 ```
 
 ## With Unity (via UniCLI)
@@ -207,7 +207,7 @@ monodebug attach 56400 --profiles "$(pwd)"
 monodebug flow wait --timeout 5000    # vmstart
 monodebug flow continue
 
-monodebug break set DebugTest.cs 19
+monodebug break set /path/to/DebugTest.cs 19
 monodebug flow wait --timeout 30000   # BP hit
 monodebug vars
 monodebug eval 'this.speed * 2'

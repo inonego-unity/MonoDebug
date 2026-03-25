@@ -1,9 +1,10 @@
 #!/bin/bash
 # MonoDebug End-to-End Test Suite
-# Usage: ./run_all.sh <sdb_port> [monodebug_path]
+# Usage: ./run_all.sh <sdb_port> <monodebug_path> <debugtest_path>
 
-PORT=${1:?Usage: $0 <sdb_port> [monodebug_path]}
+PORT=${1:?Usage: $0 <sdb_port> <monodebug_path> <debugtest_path>}
 MONO=${2:-monodebug}
+SCRIPT=${3:?Usage: $0 <sdb_port> <monodebug_path> <debugtest_path>}
 PASS=0
 FAIL=0
 TOTAL=0
@@ -23,7 +24,7 @@ check() {
 }
 
 echo "======== A. ERROR CASES ========"
-run; check "A1 no args" '"success":false'
+run; check "A1 no args (help)" 'MonoDebug v'
 run status; check "A2 no daemon" 'CONNECT_FAILED'
 run attach; check "A3 attach no port" 'INVALID_ARGS'
 
@@ -33,9 +34,9 @@ run status; check "B2 status" '"connected":true'
 run status --full; check "B3 status --full" '"threads"'
 
 echo "======== C. BREAK ========"
-run break set DebugTest.cs 14; check "C1 set" '"success":true'
-run break set DebugTest.cs 14; check "C2 duplicate BP" '"success":true'
-run break set DebugTest.cs 19 --temp; check "C3 set --temp" '"isTemp":true'
+run break set "$SCRIPT" 14; check "C1 set" '"success":true'
+run break set "$SCRIPT" 14; check "C2 duplicate BP" '"success":true'
+run break set "$SCRIPT" 19 --temp; check "C3 set --temp" '"isTemp":true'
 run break DebugTest.cs 14; check "C4 no set" 'Unknown break command'
 run break set; check "C5 no args" 'INVALID_ARGS'
 run break list; check "C6 list" '"breakpoints":'
@@ -45,7 +46,7 @@ run break remove 3; check "C9 remove dup" 'Removed'
 run break remove 4; check "C10 remove temp" 'Removed'
 run break remove 999; check "C11 not found" 'not found'
 run break remove --all; check "C12 remove all" 'Removed'
-run break set DebugTest.cs 14; check "C13 re-set" '"success":true'
+run break set "$SCRIPT" 14; check "C13 re-set" '"success":true'
 
 echo "======== D. CATCH + ISOLATION ========"
 run catch set NullReferenceException; check "D1 set" '"success":true'
@@ -92,10 +93,10 @@ run stack frame 0; check "G6 frame 0" '"frame":0'
 echo "======== G3. FLOW UNTIL + GOTO ========"
 run flow out; run flow wait --timeout 5000
 run flow continue; run flow wait --timeout 5000
-run flow until DebugTest.cs 19; check "G7 until" 'Running to'
+run flow until "$SCRIPT" 19; check "G7 until" 'Running to'
 run flow wait --timeout 5000; check "G8 until hit" '"line":'
 # goto within same method (ProcessFrame: 19 → 21)
-run flow goto DebugTest.cs 21; check "G9 goto" 'Set IP'
+run flow goto "$SCRIPT" 21; check "G9 goto" 'Set IP'
 run stack; check "G10 goto verify" '"line":21'
 
 echo "======== G4. STEP COUNT ========"
@@ -118,7 +119,7 @@ run vars; check "H5 vars while running" 'NOT_STOPPED'
 run eval 'this.speed'; check "H6 eval while running" 'NOT_STOPPED'
 run flow step; check "H7 step while running" 'NOT_STOPPED'
 # Re-set BP for remaining tests
-run break set DebugTest.cs 14; check "H8 BP set while running" '"success":true'
+run break set "$SCRIPT" 14; check "H8 BP set while running" '"success":true'
 run flow pause; check "H9 re-pause" 'Suspended'
 
 echo "======== I. PROFILE ========"

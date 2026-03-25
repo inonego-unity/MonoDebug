@@ -29,18 +29,10 @@ namespace MonoDebug
       // ------------------------------------------------------------
       static int Main(string[] args)
       {
-         if (args.Length == 0)
+         if (args.Length == 0 || args[0] == "--help" || args[0] == "-h")
          {
-            Console.WriteLine
-            (
-               IpcResponse.Error
-               (
-                  Constants.Error.InvalidArgs,
-                  "No command specified."
-               ).RawJson
-            );
-
-            return 1;
+            PrintHelp();
+            return 0;
          }
 
          var parsed = new ArgParser().Parse(args);
@@ -51,6 +43,29 @@ namespace MonoDebug
             case "daemon": return HandleDaemon(parsed);
             default:       return SendToDaemon(BuildRequest(parsed));
          }
+      }
+
+   #endregion
+
+   #region Help
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Prints usage information.
+      /// </summary>
+      // ------------------------------------------------------------
+      static void PrintHelp()
+      {
+         string exeDir   = AppContext.BaseDirectory;
+         string skillDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(exeDir, ".claude", "skills"));
+
+         Console.WriteLine
+         (
+$@"MonoDebug v{Constants.Version} — Mono SDB Debugger CLI for AI Agents
+
+Load the MonoDebug skill before use: /inonego-monodebug
+Skill path: {skillDir}"
+         );
       }
 
    #endregion

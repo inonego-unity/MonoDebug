@@ -69,7 +69,7 @@ monodebug flow wait --timeout 5000
 monodebug flow continue
 
 # 브레이크포인트 설정 + 히트 대기
-monodebug break set PlayerController.cs 42
+monodebug break set /path/to/PlayerController.cs 42
 monodebug flow wait --timeout 30000
 
 # 변수 조사
@@ -192,7 +192,7 @@ monodebug eval 'counter > 100 ? "high" : "low"'  # 삼항
 
 조건부 브레이크포인트도 eval을 사용합니다:
 ```bash
-monodebug break set Player.cs 42 --condition 'health < 10'
+monodebug break set /path/to/Player.cs 42 --condition 'health < 10'
 ```
 
 ## Unity와 함께 (UniCLI 연동)
@@ -207,7 +207,7 @@ monodebug attach 56400 --profiles "$(pwd)"
 monodebug flow wait --timeout 5000    # vmstart
 monodebug flow continue
 
-monodebug break set DebugTest.cs 19
+monodebug break set /path/to/DebugTest.cs 19
 monodebug flow wait --timeout 30000   # BP 히트
 monodebug vars
 monodebug eval 'this.speed * 2'

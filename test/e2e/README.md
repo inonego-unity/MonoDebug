@@ -17,10 +17,10 @@ unicli editor play
 ## Run
 
 ```bash
-./run_all.sh <sdb_port> [monodebug_path]
+./run_all.sh <sdb_port> <monodebug_path> <debugtest_path>
 
 # Example
-./run_all.sh 56556 "path/to/monodebug.exe"
+./run_all.sh 56556 "path/to/monodebug.exe" "/path/to/Assets/DebugTest.cs"
 ```
 
 ## Test Sections

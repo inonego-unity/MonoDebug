@@ -277,27 +277,6 @@ namespace MonoDebug
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Finds a debug point by its SDB EventRequest across all
-      /// profiles.
-      /// </summary>
-      // ------------------------------------------------------------
-      public DebugPoint FindByRequest(EventRequest request)
-      {
-         foreach (var profile in profiles.Values)
-         {
-            var point = profile.FindByRequest(request);
-
-            if (point != null)
-            {
-               return point;
-            }
-         }
-
-         return null;
-      }
-
-      // ------------------------------------------------------------
-      /// <summary>
       /// Returns all breakpoints from all profiles.
       /// </summary>
       // ------------------------------------------------------------

@@ -84,10 +84,12 @@ monodebug detach
 `flow wait` returns:
 ```json
 {"reason":"vmstart","success":true}
-{"reason":"breakpoint","thread":2,"method":"...","file":"...","line":14,"success":true}
+{"reason":"breakpoint","thread":2,"method":"...","file":"...","line":14,"eval":{"this.counter":"5","this.speed":"5.5"},"success":true}
 {"reason":"step","thread":2,"method":"...","file":"...","line":15,"success":true}
 {"reason":"timeout","success":true}
 ```
+
+The `eval` field appears only when the hit BP has `--eval` expressions attached.
 
 ---
 
@@ -145,6 +147,8 @@ monodebug thread <id>              # switch to thread
 ```bash
 monodebug vars                     # this + args + locals
 monodebug vars --depth 2           # expand nested objects
+monodebug vars --args              # args only
+monodebug vars --locals            # locals only
 monodebug vars set <name> <value>  # set variable (int, float, double, bool, long, string)
 monodebug vars --static '<type>'   # static fields of a type
 ```
@@ -161,13 +165,19 @@ monodebug vars --static '<type>'   # static fields of a type
 
 ### eval
 
+Roslyn-based C# expression evaluation:
+
 ```bash
 monodebug eval '<expr>'            # evaluate expression
 monodebug eval 'this.health'       # field access
-monodebug eval 'this.speed'        # works with primitives
+monodebug eval '1 + 2'             # arithmetic
+monodebug eval 'this.speed * 2'    # mixed expressions
+monodebug eval 'this.label.Length'  # property access
+monodebug eval 'counter > 100'     # comparison
+monodebug eval 'counter > 100 ? "high" : "low"'  # ternary
 ```
 
-eval resolves: local variables, `this` fields, method arguments. Arithmetic expressions are not supported by SDB.
+Supports: arithmetic, property access, method calls, comparisons, ternary, indexers, casts, and more.
 
 ---
 
@@ -188,7 +198,14 @@ Profiles group breakpoints and catchpoints. Each profile is saved as a separate 
 
 ---
 
+## Breakpoint Features
+
+- `--condition '<expr>'` — conditional BP using Roslyn eval. Skips hit if expression is false.
+- `--eval '<expr>'` — auto-evaluate expressions on BP hit. Results included in wait response as `"eval":{...}`.
+- `--temp` — one-shot BP, auto-removed after first hit.
+- `--hit-count N` — only stop on Nth hit.
+- `--thread <id>` — only stop on specific thread.
+
 ## Limitations
 
-- `eval` resolves field/variable access only. Arithmetic expressions and method calls are not supported.
 - SDB allows one debugger connection at a time. Detach before re-attaching.

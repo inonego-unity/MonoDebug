@@ -52,7 +52,7 @@ cli/
     │   ├── DebugProfile.cs       Profile (owns breakpoints + catchpoints)
     │   └── ProfileCollection.cs  Profile management + save/load
     └── Session/
-        ├── MonoDebugSession.cs   SDB connection + events + evaluation
+        ├── MonoDebugSession.cs   SoftDebuggerSession + Roslyn eval
         ├── StackInspector.cs     this/args/locals extraction
         ├── ValueFormatter.cs     SDB Value → JSON
         └── ExceptionHelper.cs    Exception info extraction
@@ -62,17 +62,21 @@ cli/
 
 ```bash
 # Attach to a Mono process listening on SDB port 56400
-monodebug attach 56400
+monodebug attach 56400 --profiles /path/to/project
 
-# Set a breakpoint
+# Consume vmstart event and resume
+monodebug flow wait --timeout 5000
+monodebug flow continue
+
+# Set a breakpoint and wait for hit
 monodebug break set PlayerController.cs 42
-
-# Wait for the breakpoint to hit
-monodebug flow wait --timeout 10000
+monodebug flow wait --timeout 30000
 
 # Inspect variables
 monodebug vars
 monodebug eval 'player.health'
+monodebug eval 'player.speed * 2'
+monodebug eval 'enemies.Count'
 
 # Step through code
 monodebug flow next
@@ -92,9 +96,9 @@ monodebug detach
 
 | Command | Description |
 |---------|-------------|
-| `monodebug attach <port> [--host <host>]` | Start daemon and connect to SDB |
+| `monodebug attach <port> [--host] [--profiles]` | Start daemon and connect to SDB |
 | `monodebug detach` | Disconnect and stop daemon |
-| `monodebug status` | Show connection state |
+| `monodebug status [--full]` | Show connection state (--full includes threads) |
 
 ### Flow Control
 
@@ -126,13 +130,14 @@ Options: `--condition '<expr>'`, `--hit-count N`, `--thread <id>`, `--temp`, `--
 | Command | Description |
 |---------|-------------|
 | `catch set <type> [options]` | Break on exception |
+| `catch set --all` | Break on all exceptions |
 | `catch remove <id> [--all] [--profile]` | Remove catchpoint |
 | `catch list` | List catchpoints |
 | `catch enable <id>` | Enable catchpoint |
 | `catch disable <id>` | Disable catchpoint |
-| `catch info [--stack] [--inner]` | Inspect caught exception |
+| `catch info [--stack] [--inner N]` | Inspect caught exception |
 
-Options: `--all`, `--unhandled`, `--condition`, `--profile`
+Options: `--all`, `--unhandled`, `--condition '<expr>'`, `--hit-count N`, `--thread <id>`, `--profile '<name>'`, `--desc '<text>'`
 
 ### Inspection
 
@@ -142,10 +147,10 @@ Options: `--all`, `--unhandled`, `--condition`, `--profile`
 | `stack frame <n>` | Switch stack frame |
 | `thread list` | List threads |
 | `thread <id>` | Switch thread |
-| `vars [--depth N]` | View variables (this/args/locals) |
+| `vars [--depth N] [--args] [--locals]` | View variables (this/args/locals) |
 | `vars set <name> <value>` | Set variable value |
 | `vars --static '<type>'` | View static fields |
-| `eval '<expr>'` | Evaluate expression |
+| `eval '<expr>'` | Evaluate C# expression (Roslyn) |
 
 ### Profiles
 
@@ -158,6 +163,7 @@ Debug profiles group breakpoints and catchpoints for different debugging scenari
 | `profile switch <name>` | Activate profile (disables others) |
 | `profile enable <name>` | Enable profile |
 | `profile disable <name>` | Disable profile |
+| `profile edit <name> [--desc '<text>'] [--rename '<name>']` | Edit profile |
 | `profile list` | List all profiles |
 | `profile info <name>` | Show profile details |
 
@@ -171,6 +177,24 @@ monodebug stack --full | jq '.frames[0].this'
 monodebug thread list | jq '.threads[] | select(.name != "")'
 ```
 
+## Expression Evaluation
+
+`eval` uses Roslyn-based C# expression evaluation:
+
+```bash
+monodebug eval 'this.speed'              # field access
+monodebug eval '1 + 2'                   # arithmetic
+monodebug eval 'this.speed * 2'          # mixed
+monodebug eval 'this.label.Length'        # property access
+monodebug eval 'counter > 100'           # comparison
+monodebug eval 'counter > 100 ? "high" : "low"'  # ternary
+```
+
+Conditional breakpoints also use eval:
+```bash
+monodebug break set Player.cs 42 --condition 'health < 10'
+```
+
 ## With Unity (via UniCLI)
 
 ```bash
@@ -179,10 +203,14 @@ unicli list
 unicli editor play
 
 # Use MonoDebug for debugging
-monodebug attach 56400
+monodebug attach 56400 --profiles "$(pwd)"
+monodebug flow wait --timeout 5000    # vmstart
+monodebug flow continue
+
 monodebug break set DebugTest.cs 19
-monodebug flow wait --timeout 10000
+monodebug flow wait --timeout 30000   # BP hit
 monodebug vars
+monodebug eval 'this.speed * 2'
 monodebug detach
 ```
 
@@ -199,7 +227,8 @@ dotnet test test/MonoDebug.TEST.csproj
 
 | Dependency | Purpose | License |
 |------------|---------|---------|
-| [mono/debugger-libs](https://github.com/mono/debugger-libs) | Mono.Debugger.Soft (SDB protocol) | MIT |
+| [mono/debugger-libs](https://github.com/mono/debugger-libs) | Mono.Debugger.Soft + Mono.Debugging.Soft (SDB + Roslyn eval) | MIT |
+| [Mono.Cecil](https://www.nuget.org/packages/Mono.Cecil) | Assembly metadata (runtime dependency) | MIT |
 | [InoCLI](https://github.com/inonego/InoCLI) | CLI argument parser | MIT |
 | [InoIPC](https://github.com/inonego/InoIPC) | IPC transport + frame protocol | MIT |
 

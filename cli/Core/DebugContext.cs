@@ -10,7 +10,7 @@ namespace MonoDebug
 
    #region Fields
 
-      public MonoDebugSession  Session  { get; }
+      public MonoDebugSession  Session  { get; set; }
       public ProfileCollection Profiles { get; }
 
       public long CurrentThreadId { get; set; }

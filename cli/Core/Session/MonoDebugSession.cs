@@ -179,32 +179,6 @@ namespace MonoDebug
          lastException = null;
       }
 
-      // ----------------------------------------------------------------------
-      /// <summary>
-      /// <br/> Reconnects to the same host and port. Retries up to
-      /// <br/> maxRetries times.
-      /// </summary>
-      // ----------------------------------------------------------------------
-      public bool Reconnect(int maxRetries = 30, int intervalMs = 1000)
-      {
-         int    savedPort = Port;
-         string savedHost = Host;
-
-         Disconnect();
-
-         for (int i = 0; i < maxRetries; i++)
-         {
-            Thread.Sleep(intervalMs);
-
-            if (Connect(savedPort, savedHost))
-            {
-               return true;
-            }
-         }
-
-         return false;
-      }
-
    #endregion
 
    #region SoftDebuggerSession Overrides
@@ -1052,7 +1026,7 @@ namespace MonoDebug
             {
                ["this"]   = StackInspector.GetThisValue
                (
-                  frame, depth
+                  frame, Math.Max(depth, 1)
                ),
 
                ["args"]   = StackInspector.GetArgValues

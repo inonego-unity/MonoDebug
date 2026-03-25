@@ -300,32 +300,6 @@ namespace MonoDebug
          return null;
       }
 
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Finds a debug point by its SDB EventRequest.
-      /// </summary>
-      // ------------------------------------------------------------
-      public DebugPoint FindByRequest(EventRequest request)
-      {
-         foreach (var bp in BreakPoints.Values)
-         {
-            if (bp.Request == request)
-            {
-               return bp;
-            }
-         }
-
-         foreach (var cp in CatchPoints.Values)
-         {
-            if (cp.Request == request)
-            {
-               return cp;
-            }
-         }
-
-         return null;
-      }
-
    #endregion
 
    #region Rebuild

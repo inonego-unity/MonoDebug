@@ -241,7 +241,7 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
-         int depth = optionals.GetInt("depth");
+         int depth = optionals.GetInt("depth", 1);
 
          var data = context.Session.GetFrameVariables
          (

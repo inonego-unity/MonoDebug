@@ -52,7 +52,7 @@ cli/
     │   ├── DebugProfile.cs       프로필 (브레이크포인트 + 캐치포인트 소유)
     │   └── ProfileCollection.cs  프로필 관리 + 저장/로드
     └── Session/
-        ├── MonoDebugSession.cs   SDB 연결 + 이벤트 + 평가
+        ├── MonoDebugSession.cs   SoftDebuggerSession + Roslyn 평가
         ├── StackInspector.cs     this/args/locals 추출
         ├── ValueFormatter.cs     SDB Value → JSON
         └── ExceptionHelper.cs    예외 정보 추출
@@ -62,17 +62,21 @@ cli/
 
 ```bash
 # SDB 포트 56400에서 리스닝 중인 Mono 프로세스에 연결
-monodebug attach 56400
+monodebug attach 56400 --profiles /path/to/project
 
-# 브레이크포인트 설정
+# vmstart 이벤트 소비 + 재개
+monodebug flow wait --timeout 5000
+monodebug flow continue
+
+# 브레이크포인트 설정 + 히트 대기
 monodebug break set PlayerController.cs 42
-
-# 브레이크포인트 히트 대기
-monodebug flow wait --timeout 10000
+monodebug flow wait --timeout 30000
 
 # 변수 조사
 monodebug vars
 monodebug eval 'player.health'
+monodebug eval 'player.speed * 2'
+monodebug eval 'enemies.Count'
 
 # 코드 스텝
 monodebug flow next
@@ -92,9 +96,9 @@ monodebug detach
 
 | 명령 | 설명 |
 |------|------|
-| `monodebug attach <port> [--host <host>]` | daemon 시작 + SDB 연결 |
+| `monodebug attach <port> [--host] [--profiles]` | daemon 시작 + SDB 연결 |
 | `monodebug detach` | 연결 해제 + daemon 종료 |
-| `monodebug status` | 연결 상태 확인 |
+| `monodebug status [--full]` | 연결 상태 확인 (--full: 스레드 포함) |
 
 ### 실행 제어
 
@@ -126,13 +130,14 @@ monodebug detach
 | 명령 | 설명 |
 |------|------|
 | `catch set <type> [옵션]` | 예외에서 중단 |
+| `catch set --all` | 모든 예외에서 중단 |
 | `catch remove <id> [--all] [--profile]` | 캐치포인트 제거 |
 | `catch list` | 캐치포인트 목록 |
 | `catch enable <id>` | 캐치포인트 활성화 |
 | `catch disable <id>` | 캐치포인트 비활성화 |
-| `catch info [--stack] [--inner]` | 잡힌 예외 조사 |
+| `catch info [--stack] [--inner N]` | 잡힌 예외 조사 |
 
-옵션: `--all`, `--unhandled`, `--condition`, `--profile`
+옵션: `--all`, `--unhandled`, `--condition '<expr>'`, `--hit-count N`, `--thread <id>`, `--profile '<name>'`, `--desc '<text>'`
 
 ### 조사
 
@@ -142,10 +147,10 @@ monodebug detach
 | `stack frame <n>` | 스택 프레임 전환 |
 | `thread list` | 스레드 목록 |
 | `thread <id>` | 스레드 전환 |
-| `vars [--depth N]` | 변수 조회 (this/args/locals) |
+| `vars [--depth N] [--args] [--locals]` | 변수 조회 (this/args/locals) |
 | `vars set <name> <value>` | 변수 값 설정 |
 | `vars --static '<type>'` | 정적 필드 조회 |
-| `eval '<expr>'` | 표현식 평가 |
+| `eval '<expr>'` | C# 표현식 평가 (Roslyn) |
 
 ### 프로필
 
@@ -158,6 +163,7 @@ monodebug detach
 | `profile switch <name>` | 프로필 전환 (다른 프로필 비활성화) |
 | `profile enable <name>` | 프로필 활성화 |
 | `profile disable <name>` | 프로필 비활성화 |
+| `profile edit <name> [--desc '<text>'] [--rename '<name>']` | 프로필 수정 |
 | `profile list` | 전체 프로필 목록 |
 | `profile info <name>` | 프로필 상세 |
 
@@ -171,6 +177,24 @@ monodebug stack --full | jq '.frames[0].this'
 monodebug thread list | jq '.threads[] | select(.name != "")'
 ```
 
+## 표현식 평가
+
+`eval`은 Roslyn 기반 C# 표현식 평가를 지원합니다:
+
+```bash
+monodebug eval 'this.speed'              # 필드 접근
+monodebug eval '1 + 2'                   # 산술
+monodebug eval 'this.speed * 2'          # 혼합
+monodebug eval 'this.label.Length'        # 프로퍼티 접근
+monodebug eval 'counter > 100'           # 비교
+monodebug eval 'counter > 100 ? "high" : "low"'  # 삼항
+```
+
+조건부 브레이크포인트도 eval을 사용합니다:
+```bash
+monodebug break set Player.cs 42 --condition 'health < 10'
+```
+
 ## Unity와 함께 (UniCLI 연동)
 
 ```bash
@@ -179,10 +203,14 @@ unicli list
 unicli editor play
 
 # MonoDebug로 디버깅
-monodebug attach 56400
+monodebug attach 56400 --profiles "$(pwd)"
+monodebug flow wait --timeout 5000    # vmstart
+monodebug flow continue
+
 monodebug break set DebugTest.cs 19
-monodebug flow wait --timeout 10000
+monodebug flow wait --timeout 30000   # BP 히트
 monodebug vars
+monodebug eval 'this.speed * 2'
 monodebug detach
 ```
 
@@ -199,7 +227,8 @@ dotnet test test/MonoDebug.TEST.csproj
 
 | 의존성 | 용도 | 라이선스 |
 |--------|------|---------|
-| [mono/debugger-libs](https://github.com/mono/debugger-libs) | Mono.Debugger.Soft (SDB 프로토콜) | MIT |
+| [mono/debugger-libs](https://github.com/mono/debugger-libs) | Mono.Debugger.Soft + Mono.Debugging.Soft (SDB + Roslyn 평가) | MIT |
+| [Mono.Cecil](https://www.nuget.org/packages/Mono.Cecil) | 어셈블리 메타데이터 (런타임 의존성) | MIT |
 | [InoCLI](https://github.com/inonego/InoCLI) | CLI 인자 파서 | MIT |
 | [InoIPC](https://github.com/inonego/InoIPC) | IPC 전송 + 프레임 프로토콜 | MIT |
 

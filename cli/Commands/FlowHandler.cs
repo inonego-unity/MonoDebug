@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 using Mono.Debugger.Soft;
 
@@ -134,14 +135,96 @@ namespace MonoDebug
             context.CurrentFrame    = 0;
          }
 
-         // Auto-evaluate expressions on breakpoint hit
+         // Process breakpoint hit
          if (reason == "breakpoint")
          {
-            EvalBreakpointExpressions(context, evt);
+            var hitBp = FindHitBreakpoint(context, evt);
+
+            if (hitBp != null)
+            {
+               // ThreadFilter check
+               if (hitBp.ThreadFilter > 0
+                  && evt.ContainsKey("thread")
+                  && evt["thread"] is long threadId
+                  && threadId != hitBp.ThreadFilter)
+               {
+                  context.Session.Resume();
+                  return HandleWait(context, optionals);
+               }
+
+               // Condition check
+               if (!string.IsNullOrEmpty(hitBp.Condition))
+               {
+                  var condResult = context.Session.Evaluate
+                  (
+                     context.CurrentThreadId,
+                     context.CurrentFrame,
+                     hitBp.Condition
+                  );
+
+                  if (condResult == null
+                     || condResult.ToString() == "false"
+                     || condResult.ToString() == "False")
+                  {
+                     context.Session.Resume();
+                     return HandleWait(context, optionals);
+                  }
+               }
+
+               // ProcessHit (hits++, temp remove)
+               foreach (var profile in context.Profiles.List())
+               {
+                  if (profile.Find(hitBp.Id) != null)
+                  {
+                     profile.ProcessHit(hitBp);
+                     break;
+                  }
+               }
+            }
+
+            EvalBreakpointExpressions(context, evt, hitBp);
          }
 
          evt["success"] = true;
          return JsonSerializer.Serialize(evt);
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Finds the breakpoint that was hit by matching file:line.
+      /// </summary>
+      // ------------------------------------------------------------
+      private static BreakPoint FindHitBreakpoint
+      (
+         DebugContext context,
+         Dictionary<string, object> evt
+      )
+      {
+         string file = evt.ContainsKey("file")
+            ? evt["file"]?.ToString() : "";
+
+         int line = evt.ContainsKey("line") && evt["line"] is int ln
+            ? ln : 0;
+
+         if (string.IsNullOrEmpty(file) || line <= 0)
+         {
+            return null;
+         }
+
+         foreach (var bp in context.Profiles.AllBreakPoints())
+         {
+            if (line == bp.Line
+               && file.EndsWith
+               (
+                  bp.File,
+                  System.StringComparison.OrdinalIgnoreCase
+               ))
+            {
+               return bp;
+            }
+         }
+
+         return null;
       }
 
       // ------------------------------------------------------------
@@ -153,52 +236,32 @@ namespace MonoDebug
       private static void EvalBreakpointExpressions
       (
          DebugContext context,
-         Dictionary<string, object> evt
+         Dictionary<string, object> evt,
+         BreakPoint hitBp
       )
       {
-         // Find which breakpoint was hit by matching file:line
-         string file = evt.ContainsKey("file")
-            ? evt["file"]?.ToString() : "";
-
-         int line = evt.ContainsKey("line") && evt["line"] is int ln
-            ? ln : 0;
-
-         if (string.IsNullOrEmpty(file) || line <= 0)
+         if (hitBp == null
+            || hitBp.EvalExpressions == null
+            || hitBp.EvalExpressions.Count == 0)
          {
             return;
          }
 
-         // Search all profiles for a BP at this location
-         foreach (var bp in context.Profiles.AllBreakPoints())
+         var results = new Dictionary<string, object>();
+
+         foreach (var expr in hitBp.EvalExpressions)
          {
-            if (bp.EvalExpressions == null
-               || bp.EvalExpressions.Count == 0)
-            {
-               continue;
-            }
+            var val = context.Session.Evaluate
+            (
+               context.CurrentThreadId,
+               context.CurrentFrame,
+               expr
+            );
 
-            // Match by file ending and line
-            if (line == bp.Line
-               && file.EndsWith(bp.File, System.StringComparison.OrdinalIgnoreCase))
-            {
-               var results = new Dictionary<string, object>();
-
-               foreach (var expr in bp.EvalExpressions)
-               {
-                  var val = context.Session.Evaluate
-                  (
-                     context.CurrentThreadId,
-                     context.CurrentFrame,
-                     expr
-                  );
-
-                  results[expr] = val;
-               }
-
-               evt["eval"] = results;
-               return;
-            }
+            results[expr] = val;
          }
+
+         evt["eval"] = results;
       }
 
    #endregion
@@ -298,6 +361,35 @@ namespace MonoDebug
       /// Args: [file] line.
       /// </summary>
       // ------------------------------------------------------------
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Parses [file] line from args.
+      /// </summary>
+      // ------------------------------------------------------------
+      private static void ParseFileLine
+      (
+         List<string> args, out string file, out int line
+      )
+      {
+         file = "";
+         line = 0;
+
+         if (args.Count == 1)
+         {
+            int.TryParse(args[0], out line);
+         }
+         else if (args.Count >= 2)
+         {
+            file = args[0];
+            int.TryParse(args[1], out line);
+         }
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Sets a temporary breakpoint at the target line and resumes.
+      /// </summary>
+      // ------------------------------------------------------------
       private static string HandleUntil
       (
          DebugContext context, List<string> args
@@ -311,18 +403,7 @@ namespace MonoDebug
             ).RawJson;
          }
 
-         string file = "";
-         int    line = 0;
-
-         if (args.Count == 1)
-         {
-            int.TryParse(args[0], out line);
-         }
-         else if (args.Count >= 2)
-         {
-            file = args[0];
-            int.TryParse(args[1], out line);
-         }
+         ParseFileLine(args, out string file, out int line);
 
          if (line <= 0)
          {
@@ -383,18 +464,7 @@ namespace MonoDebug
             ).RawJson;
          }
 
-         string file = "";
-         int    line = 0;
-
-         if (args.Count == 1)
-         {
-            int.TryParse(args[0], out line);
-         }
-         else if (args.Count >= 2)
-         {
-            file = args[0];
-            int.TryParse(args[1], out line);
-         }
+         ParseFileLine(args, out string file, out int line);
 
          if (line <= 0)
          {
@@ -456,20 +526,36 @@ namespace MonoDebug
       {
          Console.Error.WriteLine("Domain reload detected. Reconnecting...");
 
-         if (context.Session.Reconnect())
+         int    port = context.Session.Port;
+         string host = context.Session.Host;
+
+         // Dispose old session — SoftDebuggerSession can't be reused
+         try { context.Session.Disconnect(); } catch { }
+
+         // Create new session and reconnect
+         for (int i = 0; i < 30; i++)
          {
-            Console.Error.WriteLine
-            (
-               $"Reconnected on port {context.Session.Port}."
-            );
+            Thread.Sleep(1000);
 
-            context.Profiles.RebuildAll(context.Session);
+            var session = new MonoDebugSession();
 
-            return IpcResponse.Success(new Dictionary<string, object>
+            if (session.Connect(port, host))
             {
-               ["reason"] = "domain_reload",
-               ["port"]   = context.Session.Port
-            }).RawJson;
+               context.Session = session;
+
+               Console.Error.WriteLine
+               (
+                  $"Reconnected on port {port}."
+               );
+
+               context.Profiles.RebuildAll(session);
+
+               return IpcResponse.Success(new Dictionary<string, object>
+               {
+                  ["reason"] = "domain_reload",
+                  ["port"]   = port
+               }).RawJson;
+            }
          }
 
          return IpcResponse.Error

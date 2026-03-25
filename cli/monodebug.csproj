@@ -14,9 +14,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Mono.Cecil" Version="0.11.5" />
+    <ProjectReference Include="..\lib\debugger-libs\Mono.Debugging\Mono.Debugging.csproj" />
+    <ProjectReference Include="..\lib\debugger-libs\Mono.Debugging.Soft\Mono.Debugging.Soft.csproj" />
     <ProjectReference Include="..\lib\debugger-libs\Mono.Debugger.Soft\Mono.Debugger.Soft.csproj" />
     <ProjectReference Include="..\lib\InoCLI\src\InoCLI.csproj" />
-    <ProjectReference Include="..\lib\InoIPC\src\InoIPC\InoIPC.csproj" />
+    <ProjectReference Include="..\lib\InoIPC\src\InoIPC.csproj" />
   </ItemGroup>
 
 </Project>

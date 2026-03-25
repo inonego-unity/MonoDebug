@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -7,23 +8,34 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Mono.Debugger.Soft;
+using Mono.Debugging.Client;
+using Mono.Debugging.Soft;
+using Mono.Debugging.Evaluation;
+
+using SdbStackFrame = Mono.Debugger.Soft.StackFrame;
 
 namespace MonoDebug
 {
    // ============================================================
    /// <summary>
-   /// Mono SDB session. Manages VM connection, events, stepping,
-   /// expression evaluation, and stack inspection.
+   /// Mono SDB session built on SoftDebuggerSession.
+   /// Overrides OnContinue/HandleException to support Unity's
+   /// suspend=n mode. Provides synchronous WaitForEvent and
+   /// full C# expression evaluation via Roslyn.
    /// </summary>
    // ============================================================
-   class MonoDebugSession : IDisposable
+   class MonoDebugSession : SoftDebuggerSession
    {
 
    #region Fields
 
-      private VirtualMachine    vm;
-      private StepEventRequest  activeStepRequest;
-      private ObjectMirror      lastException;
+      private readonly BlockingCollection<TargetEventArgs> eventQueue
+         = new BlockingCollection<TargetEventArgs>();
+
+      private readonly ManualResetEventSlim readyEvent
+         = new ManualResetEventSlim(false);
+
+      private ObjectMirror lastException;
 
    #endregion
 
@@ -34,14 +46,7 @@ namespace MonoDebug
       /// The underlying SDB virtual machine instance.
       /// </summary>
       // ------------------------------------------------------------
-      public VirtualMachine VM => vm;
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Whether the VM is currently connected.
-      /// </summary>
-      // ------------------------------------------------------------
-      public bool IsConnected => vm != null;
+      public VirtualMachine VM => VirtualMachine;
 
       // ------------------------------------------------------------
       /// <summary>
@@ -73,65 +78,111 @@ namespace MonoDebug
 
    #endregion
 
+   #region Constructor
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Creates a new MonoDebugSession and subscribes to events.
+      /// </summary>
+      // ------------------------------------------------------------
+      public MonoDebugSession()
+      {
+         // Enqueue relevant events for WaitForEvent
+         TargetReady              += OnEnqueue;
+         TargetHitBreakpoint      += OnEnqueue;
+         TargetStopped            += OnEnqueue;
+         TargetInterrupted        += OnEnqueue;
+         TargetExceptionThrown    += OnEnqueue;
+         TargetUnhandledException += OnEnqueue;
+
+         // Connection ready signal
+         TargetReady += OnTargetReady;
+
+         // Track suspended state
+         TargetHitBreakpoint      += OnStopped;
+         TargetStopped            += OnStopped;
+         TargetInterrupted        += OnStopped;
+         TargetExceptionThrown    += OnException;
+         TargetUnhandledException += OnException;
+      }
+
+   #endregion
+
    #region Connection
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Connects to a Mono SDB debugger at the given port and host.
+      /// Connects to a Mono SDB debugger at the given port and
+      /// host. Blocks until connected or timeout.
       /// </summary>
       // ------------------------------------------------------------
       public bool Connect(int port, string host = "localhost")
       {
          try
          {
-            var ep = new IPEndPoint
+            Port = port;
+            Host = host;
+
+            var address = IPAddress.Parse
             (
-               IPAddress.Parse(ResolveHost(host)), port
+               host == "localhost" ? "127.0.0.1" : host
             );
 
-            var task = Task.Run(() => VirtualMachineManager.Connect(ep));
+            var connectArgs = new SoftDebuggerConnectArgs
+            (
+               "monodebug", address, port
+            );
 
-            if (task.Wait(Constants.ConnectTimeout))
-            {
-               vm   = task.Result;
-               Port = port;
-               Host = host;
+            connectArgs.MaxConnectionAttempts = 3;
+            connectArgs.TimeBetweenConnectionAttempts = 1000;
 
-               SetupEventHandlers();
+            var startInfo = new SoftDebuggerStartInfo(connectArgs);
+            var options   = new DebuggerSessionOptions();
 
-               return true;
-            }
+            options.EvaluationOptions
+               = EvaluationOptions.DefaultOptions.Clone();
+
+            options.EvaluationOptions.AllowTargetInvoke = true;
+            options.EvaluationOptions.AllowMethodEvaluation = true;
+            options.EvaluationOptions.EvaluationTimeout = 5000;
+
+            readyEvent.Reset();
+
+            Run(startInfo, options);
+
+            return readyEvent.Wait(Constants.ConnectTimeout);
          }
-         catch { }
-
-         return false;
+         catch
+         {
+            return false;
+         }
       }
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Disconnects from the VM and resets all session state.
+      /// Disconnects from the VM without terminating the debuggee.
       /// </summary>
       // ------------------------------------------------------------
       public void Disconnect()
       {
-         if (vm == null)
+         try
          {
-            return;
+            if (VirtualMachine != null)
+            {
+               VirtualMachine.Disconnect();
+            }
          }
+         catch { }
 
-         try { vm.Disconnect(); } catch { }
-
-         vm                = null;
-         IsSuspended       = false;
-         StoppedThread     = null;
-         activeStepRequest = null;
-         lastException     = null;
+         IsSuspended   = false;
+         StoppedThread = null;
+         lastException = null;
       }
 
       // ----------------------------------------------------------------------
       /// <summary>
-      /// <br/> Reconnects to the same host and port from the last
-      /// <br/> successful Connect call. Retries up to maxRetries times.
+      /// <br/> Reconnects to the same host and port. Retries up to
+      /// <br/> maxRetries times.
       /// </summary>
       // ----------------------------------------------------------------------
       public bool Reconnect(int maxRetries = 30, int intervalMs = 1000)
@@ -154,114 +205,228 @@ namespace MonoDebug
          return false;
       }
 
+   #endregion
+
+   #region SoftDebuggerSession Overrides
+
       // ------------------------------------------------------------
       /// <summary>
-      /// Releases VM connection resources.
+      /// Override OnContinue to handle Unity's suspend=n mode.
+      /// Catches NOT_SUSPENDED errors when VM is already running.
       /// </summary>
       // ------------------------------------------------------------
-      public void Dispose()
+      protected override void OnContinue()
       {
-         Disconnect();
+         ThreadPool.QueueUserWorkItem(delegate
+         {
+            try
+            {
+               Adaptor.CancelAsyncOperations();
+               OnResumed();
+               VirtualMachine.Resume();
+            }
+            catch (Mono.Debugger.Soft.CommandException)
+            {
+               // NOT_SUSPENDED — VM already running (suspend=n)
+            }
+            catch (Exception ex)
+            {
+               if (!HandleException(ex))
+               {
+                  OnDebuggerOutput(true, ex.ToString());
+               }
+            }
+         });
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Override HandleException to be more lenient with
+      /// connection errors that may occur with suspend=n.
+      /// </summary>
+      // ------------------------------------------------------------
+      protected override bool HandleException(Exception ex)
+      {
+         if (ex is Mono.Debugger.Soft.CommandException)
+         {
+            // Swallow SDB command errors (NOT_SUSPENDED, etc.)
+            return true;
+         }
+
+         return base.HandleException(ex);
       }
 
    #endregion
 
-   #region Event Handling
+   #region Event Handlers
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Enables core VM lifecycle events.
+      /// Called when the session is ready (VM connected).
       /// </summary>
       // ------------------------------------------------------------
-      private void SetupEventHandlers()
+      private void OnTargetReady(object sender, TargetEventArgs e)
       {
-         vm.EnableEvents
-         (
-            EventType.VMStart,
-            EventType.VMDeath,
-            EventType.VMDisconnect
-         );
+         readyEvent.Set();
       }
 
-      // ----------------------------------------------------------------------
+      // ------------------------------------------------------------
       /// <summary>
-      /// <br/> Waits for the next debug event from the VM.
-      /// <br/> Returns a serializable dictionary describing the event,
-      /// <br/> or a timeout/disconnected reason.
+      /// Enqueues relevant events for WaitForEvent.
       /// </summary>
-      // ----------------------------------------------------------------------
-      public Dictionary<string, object> WaitForEvent(int timeoutMs = 30000)
+      // ------------------------------------------------------------
+      private void OnEnqueue(object sender, TargetEventArgs e)
       {
-         if (vm == null)
+         eventQueue.Add(e);
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Handles stop events (breakpoint, step, pause).
+      /// </summary>
+      // ------------------------------------------------------------
+      private void OnStopped(object sender, TargetEventArgs e)
+      {
+         IsSuspended = true;
+
+         long tid = 0;
+
+         if (e.Thread != null)
+         {
+            tid = e.Thread.Id;
+         }
+         else if (ActiveThread != null)
+         {
+            tid = ActiveThread.Id;
+         }
+
+         if (tid > 0 && VirtualMachine != null)
+         {
+            StoppedThread = ResolveThread(tid);
+         }
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Handles exception events.
+      /// </summary>
+      // ------------------------------------------------------------
+      private void OnException(object sender, TargetEventArgs e)
+      {
+         IsSuspended = true;
+
+         if (e.Thread != null && VirtualMachine != null)
+         {
+            StoppedThread = ResolveThread(e.Thread.Id);
+
+            try
+            {
+               var frames = StoppedThread?.GetFrames();
+
+               if (frames != null && frames.Length > 0)
+               {
+                  if (frames[0].GetThis() is ObjectMirror obj)
+                  {
+                     lastException = obj;
+                  }
+               }
+            }
+            catch { }
+         }
+      }
+
+   #endregion
+
+   #region WaitForEvent
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Waits for the next debug event with a timeout.
+      /// </summary>
+      // ------------------------------------------------------------
+      public Dictionary<string, object> WaitForEvent
+      (
+         int timeoutMs = 30000
+      )
+      {
+         if (VirtualMachine == null && !IsConnected)
          {
             return null;
          }
 
-         int actualTimeout = timeoutMs > 0 ? timeoutMs : 30000;
-
-         try
+         if (eventQueue.TryTake(out var args, timeoutMs))
          {
-            var      task = Task.Run(() => vm.GetNextEventSet());
-            EventSet es   = null;
-
-            if (task.Wait(actualTimeout))
-            {
-               es = task.Result;
-            }
-            else if (task.IsFaulted
-               && task.Exception?.InnerException is VMDisconnectedException)
-            {
-               return OnDisconnected();
-            }
-
-            if (es == null || es.Events.Length == 0)
-            {
-               return new Dictionary<string, object> { ["reason"] = "timeout" };
-            }
-
-            IsSuspended = true;
-
-            return EventToDict(es.Events[0]);
+            return EventToDict(args);
          }
-         catch (VMDisconnectedException)
+
+         if (!IsConnected)
          {
-            return OnDisconnected();
+            return new Dictionary<string, object>
+            {
+               ["reason"] = "disconnected"
+            };
          }
+
+         return new Dictionary<string, object>
+         {
+            ["reason"] = "timeout"
+         };
       }
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Converts a debug event to a serializable dictionary.
+      /// Converts a TargetEventArgs to a dictionary.
       /// </summary>
       // ------------------------------------------------------------
-      private Dictionary<string, object> EventToDict(Event evt)
+      private Dictionary<string, object> EventToDict
+      (
+         TargetEventArgs args
+      )
       {
-         var dict = new Dictionary<string, object>
-         {
-            ["reason"] = evt.EventType.ToString().ToLowerInvariant()
-         };
+         var dict = new Dictionary<string, object>();
 
-         if (evt is BreakpointEvent bpe)
+         switch (args.Type)
          {
-            FillStopEvent(dict, bpe.Thread, bpe.Method);
-         }
-         else if (evt is StepEvent se)
-         {
-            FillStopEvent(dict, se.Thread, se.Method);
-            CancelStep();
-         }
-         else if (evt is ExceptionEvent ee)
-         {
-            StoppedThread     = ee.Thread;
-            lastException     = ee.Exception;
-            dict["thread"]    = ee.Thread.Id;
-            dict["exception"] = ee.Exception?.Type?.FullName ?? "";
+            case TargetEventType.TargetReady:
+               dict["reason"] = "vmstart";
+               break;
 
-            dict["message"] = ee.Exception != null
-               ? ExceptionHelper.GetMessage(ee.Exception)
-               : "";
+            case TargetEventType.TargetHitBreakpoint:
+               dict["reason"] = "breakpoint";
+               FillStopEvent(dict, args);
+               break;
 
-            FillLocation(dict, ee.Thread);
+            case TargetEventType.TargetStopped:
+               dict["reason"] = "step";
+               FillStopEvent(dict, args);
+               break;
+
+            case TargetEventType.TargetInterrupted:
+               dict["reason"] = "pause";
+               FillStopEvent(dict, args);
+               break;
+
+            case TargetEventType.ExceptionThrown:
+            case TargetEventType.UnhandledException:
+               dict["reason"] = "exception";
+               FillStopEvent(dict, args);
+
+               if (lastException != null)
+               {
+                  dict["exception"] = ExceptionHelper.GetMessage
+                  (
+                     lastException
+                  );
+               }
+               break;
+
+            case TargetEventType.TargetExited:
+               dict["reason"] = "disconnected";
+               break;
+
+            default:
+               dict["reason"] = args.Type.ToString();
+               break;
          }
 
          return dict;
@@ -269,33 +434,43 @@ namespace MonoDebug
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Fills common stop-event fields for break/step events.
+      /// Fills stop event details (thread, method, file, line).
       /// </summary>
       // ------------------------------------------------------------
       private void FillStopEvent
       (
          Dictionary<string, object> dict,
-         ThreadMirror thread, MethodMirror method
+         TargetEventArgs args
       )
       {
-         StoppedThread  = thread;
-         dict["thread"] = thread.Id;
-         dict["method"] = method?.FullName ?? "";
+         if (args.Thread != null)
+         {
+            dict["thread"] = args.Thread.Id;
+         }
 
-         FillLocation(dict, thread);
-      }
+         if (StoppedThread == null || VirtualMachine == null)
+         {
+            return;
+         }
 
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Resets state on VM disconnection.
-      /// </summary>
-      // ------------------------------------------------------------
-      private Dictionary<string, object> OnDisconnected()
-      {
-         vm          = null;
-         IsSuspended = false;
+         try
+         {
+            var frames = StoppedThread.GetFrames();
 
-         return new Dictionary<string, object> { ["reason"] = "disconnected" };
+            if (frames.Length > 0)
+            {
+               var frame = frames[0];
+
+               dict["method"] = frame.Method.FullName;
+
+               if (frame.Location != null)
+               {
+                  dict["file"] = frame.Location.SourceFile;
+                  dict["line"] = frame.Location.LineNumber;
+               }
+            }
+         }
+         catch { }
       }
 
    #endregion
@@ -304,21 +479,19 @@ namespace MonoDebug
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Resumes VM execution and cancels any active step request.
+      /// Resumes VM execution.
       /// </summary>
       // ------------------------------------------------------------
       public void Resume()
       {
-         if (vm == null)
+         IsSuspended   = false;
+         StoppedThread = null;
+
+         try
          {
-            return;
+            Continue();
          }
-
-         CancelStep();
-
-         vm.Resume();
-
-         IsSuspended = false;
+         catch { }
       }
 
       // ------------------------------------------------------------
@@ -326,59 +499,80 @@ namespace MonoDebug
       /// Suspends VM execution.
       /// </summary>
       // ------------------------------------------------------------
-      public void Suspend()
+      public new void Suspend()
       {
-         if (vm == null)
+         if (VirtualMachine == null)
          {
             return;
          }
 
-         vm.Suspend();
+         try
+         {
+            // Directly suspend VM and find a thread with user frames
+            VirtualMachine.Suspend();
+            IsSuspended = true;
 
-         IsSuspended = true;
+            foreach (var t in VirtualMachine.GetThreads())
+            {
+               try
+               {
+                  var frames = t.GetFrames();
+
+                  if (frames.Length > 0
+                     && frames[0].Location != null
+                     && frames[0].Location.SourceFile != null)
+                  {
+                     StoppedThread = t;
+                     return;
+                  }
+               }
+               catch { }
+            }
+
+            // No user frame found — pick first thread with any frames
+            foreach (var t in VirtualMachine.GetThreads())
+            {
+               try
+               {
+                  if (t.GetFrames().Length > 0)
+                  {
+                     StoppedThread = t;
+                     return;
+                  }
+               }
+               catch { }
+            }
+         }
+         catch { }
       }
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Creates a step request and resumes execution.
+      /// Steps in the given direction on the stopped thread.
       /// </summary>
       // ------------------------------------------------------------
       public void Step(ThreadMirror thread, StepDepth depth)
       {
-         if (vm == null || thread == null)
-         {
-            return;
-         }
-
-         CancelStep();
-
-         var req   = vm.CreateStepRequest(thread);
-         req.Depth = depth;
-         req.Size  = StepSize.Line;
-         req.Enable();
-
-         activeStepRequest = req;
-
-         vm.Resume();
-
          IsSuspended = false;
-      }
 
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Cancels any active step request.
-      /// </summary>
-      // ------------------------------------------------------------
-      public void CancelStep()
-      {
-         if (activeStepRequest == null)
+         try
          {
-            return;
+            switch (depth)
+            {
+               case StepDepth.Over:
+                  NextLine();
+                  break;
+
+               case StepDepth.Into:
+                  StepLine();
+                  break;
+
+               case StepDepth.Out:
+                  Finish();
+                  break;
+            }
          }
-
-         try { activeStepRequest.Disable(); } catch { }
-
-         activeStepRequest = null;
+         catch { }
       }
 
    #endregion
@@ -388,17 +582,20 @@ namespace MonoDebug
       // ------------------------------------------------------------
       /// <summary>
       /// Sets the instruction pointer to file:line on the stopped
-      /// thread. Returns true on success.
+      /// thread.
       /// </summary>
       // ------------------------------------------------------------
       public bool SetIP(string file, int line)
       {
-         if (StoppedThread == null || vm == null)
+         if (StoppedThread == null || VirtualMachine == null)
          {
             return false;
          }
 
-         var location = DebugProfile.ResolveLocation(vm, file, line);
+         var location = DebugProfile.ResolveLocation
+         (
+            VirtualMachine, file, line
+         );
 
          if (location == null)
          {
@@ -425,21 +622,23 @@ namespace MonoDebug
       /// Gets static fields of a type by name.
       /// </summary>
       // ------------------------------------------------------------
-      public Dictionary<string, object> GetStaticFields(string typeName)
+      public Dictionary<string, object> GetStaticFields
+      (
+         string typeName
+      )
       {
-         if (vm == null)
+         if (VirtualMachine == null)
          {
             return null;
          }
 
          try
          {
-            var types = vm.GetTypes(typeName, false);
+            var types = VirtualMachine.GetTypes(typeName, false);
 
             if (types.Count == 0)
             {
-               // Try partial match
-               types = vm.GetTypes(typeName, true);
+               types = VirtualMachine.GetTypes(typeName, true);
             }
 
             if (types.Count == 0)
@@ -483,7 +682,6 @@ namespace MonoDebug
       // ------------------------------------------------------------
       /// <summary>
       /// Sets a local variable or field value in the current frame.
-      /// Supports primitives (int, float, string, bool).
       /// </summary>
       // ------------------------------------------------------------
       public bool SetVariable
@@ -516,7 +714,10 @@ namespace MonoDebug
             {
                if (local.Name == name)
                {
-                  var val = ParseValue(vm, local.Type, value);
+                  var val = ParseValue
+                  (
+                     VirtualMachine, local.Type, value
+                  );
 
                   if (val != null)
                   {
@@ -537,7 +738,8 @@ namespace MonoDebug
                {
                   var val = ParseValue
                   (
-                     vm, parameters[i].ParameterType, value
+                     VirtualMachine,
+                     parameters[i].ParameterType, value
                   );
 
                   if (val != null)
@@ -561,7 +763,7 @@ namespace MonoDebug
                {
                   var val = ParseValue
                   (
-                     vm, field.FieldType, value,
+                     VirtualMachine, field.FieldType, value,
                      thisObj.Domain
                   );
 
@@ -577,7 +779,11 @@ namespace MonoDebug
          }
          catch (Exception ex)
          {
-            Console.Error.WriteLine($"SetVariable error: {ex.Message}");
+            Console.Error.WriteLine
+            (
+               $"SetVariable error: {ex.Message}"
+            );
+
             return false;
          }
       }
@@ -597,17 +803,20 @@ namespace MonoDebug
          {
             string typeName = type.FullName;
 
-            if (typeName == "System.Int32" && int.TryParse(value, out int i))
+            if (typeName == "System.Int32"
+               && int.TryParse(value, out int i))
             {
                return vm.CreateValue(i);
             }
 
-            if (typeName == "System.Single" && float.TryParse(value, out float f))
+            if (typeName == "System.Single"
+               && float.TryParse(value, out float f))
             {
                return vm.CreateValue(f);
             }
 
-            if (typeName == "System.Double" && double.TryParse(value, out double d))
+            if (typeName == "System.Double"
+               && double.TryParse(value, out double d))
             {
                return vm.CreateValue(d);
             }
@@ -620,14 +829,14 @@ namespace MonoDebug
                }
             }
 
-            if (typeName == "System.Int64" && long.TryParse(value, out long l))
+            if (typeName == "System.Int64"
+               && long.TryParse(value, out long l))
             {
                return vm.CreateValue(l);
             }
 
             if (typeName == "System.String")
             {
-               // Use target object's domain if available
                if (context != null)
                {
                   return context.CreateString(value);
@@ -638,7 +847,10 @@ namespace MonoDebug
          }
          catch (Exception ex)
          {
-            Console.Error.WriteLine($"ParseValue error: {ex.Message}");
+            Console.Error.WriteLine
+            (
+               $"ParseValue error: {ex.Message}"
+            );
          }
 
          return null;
@@ -650,8 +862,7 @@ namespace MonoDebug
 
       // ----------------------------------------------------------------------
       /// <summary>
-      /// <br/> Gets exception details from the last caught exception.
-      /// <br/> Optionally includes stack trace and inner exceptions.
+      /// Gets exception details from the last caught exception.
       /// </summary>
       // ----------------------------------------------------------------------
       public Dictionary<string, object> GetExceptionInfo
@@ -666,12 +877,10 @@ namespace MonoDebug
 
          try
          {
-            if (StoppedThread.GetFrames().Length == 0)
-            {
-               return null;
-            }
-
-            return ExceptionHelper.GetInfo(lastException, includeStack, innerDepth);
+            return ExceptionHelper.GetInfo
+            (
+               lastException, includeStack, innerDepth
+            );
          }
          catch
          {
@@ -685,160 +894,81 @@ namespace MonoDebug
 
       // ----------------------------------------------------------------------
       /// <summary>
-      /// <br/> Evaluates an expression in the context of the given
-      /// <br/> thread and frame. Resolves in order:
-      /// <br/> local variable → this.field → field on this → argument.
+      /// <br/> Evaluates a C# expression in the context of the
+      /// <br/> given thread and frame. Uses Roslyn-based evaluator
+      /// <br/> via SoftDebuggerSession, falls back to simple
+      /// <br/> name resolution on failure.
       /// </summary>
       // ----------------------------------------------------------------------
-      public object Evaluate(long threadId, int frameIndex, string expression)
+      public object Evaluate
+      (
+         long threadId, int frameIndex, string expression
+      )
       {
-         var frame = GetFrame(threadId, frameIndex);
+         var sdbFrame = GetFrame(threadId, frameIndex);
 
-         if (frame == null)
+         if (sdbFrame == null)
          {
             return null;
          }
 
-         return TryResolveLocal(frame, expression)
-            ??  TryResolveThisField(frame, expression)
-            ??  TryResolveArg(frame, expression);
+         try
+         {
+            var evalOptions
+               = EvaluationOptions.DefaultOptions.Clone();
+
+            evalOptions.AllowTargetInvoke = true;
+            evalOptions.AllowMethodEvaluation = true;
+            evalOptions.EvaluationTimeout = 5000;
+
+            var ctx = new SoftEvaluationContext
+            (
+               this, sdbFrame, evalOptions
+            );
+
+            var result = ctx.Evaluator.Evaluate(ctx, expression);
+
+            if (result is ValueReference valRef)
+            {
+               var objVal = valRef.CreateObjectValue(false);
+               return FormatObjectValue(objVal);
+            }
+
+            return result;
+         }
+         catch
+         {
+            return null;
+         }
       }
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Tries to resolve expression as a local variable.
+      /// Formats an ObjectValue to a JSON-friendly object.
       /// </summary>
       // ------------------------------------------------------------
-      private object TryResolveLocal(StackFrame frame, string expression)
+      private static object FormatObjectValue(ObjectValue objVal)
       {
-         try
+         if (objVal == null)
          {
-            foreach (var local in frame.GetVisibleVariables())
-            {
-               if (local.Name == expression)
-               {
-                  return ValueFormatter.Format(frame.GetValue(local), 1);
-               }
-            }
-         }
-         catch { }
-
-         return null;
-      }
-
-      // ----------------------------------------------------------------------
-      /// <summary>
-      /// <br/> Tries to resolve expression as a field on 'this'.
-      /// <br/> Handles both explicit "this.field" and implicit "field".
-      /// </summary>
-      // ----------------------------------------------------------------------
-      private object TryResolveThisField(StackFrame frame, string expression)
-      {
-         // this.field (explicit)
-         if (expression.StartsWith("this."))
-         {
-            try
-            {
-               if (frame.GetThis() is ObjectMirror om)
-               {
-                  var f = om.Type.GetField(expression[5..]);
-
-                  if (f != null)
-                  {
-                     return ValueFormatter.Format(om.GetValue(f), 1);
-                  }
-               }
-            }
-            catch { }
+            return null;
          }
 
-         // Field on 'this' (implicit)
-         try
+         if (objVal.HasFlag(ObjectValueFlags.Primitive))
          {
-            if (frame.GetThis() is ObjectMirror om)
-            {
-               var f = om.Type.GetField(expression);
-
-               if (f != null)
-               {
-                  return ValueFormatter.Format(om.GetValue(f), 1);
-               }
-            }
+            return objVal.Value;
          }
-         catch { }
 
-         return null;
-      }
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Tries to resolve expression as a method argument.
-      /// </summary>
-      // ------------------------------------------------------------
-      private object TryResolveArg(StackFrame frame, string expression)
-      {
-         try
-         {
-            var parms = frame.Method.GetParameters();
-
-            for (int i = 0; i < parms.Length; i++)
-            {
-               if (parms[i].Name == expression)
-               {
-                  return ValueFormatter.Format(frame.GetArgument(i), 1);
-               }
-            }
-         }
-         catch { }
-
-         return null;
+         return objVal.DisplayValue ?? objVal.Value;
       }
 
    #endregion
 
-   #region Stack / Thread
+   #region Stack / Thread / Variables
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Gets a thread mirror by its ID.
-      /// </summary>
-      // ------------------------------------------------------------
-      public ThreadMirror GetThread(long id)
-      {
-         if (vm == null)
-         {
-            return null;
-         }
-
-         return vm.GetThreads().FirstOrDefault(t => t.Id == id);
-      }
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Returns all threads with ID, name, and state.
-      /// </summary>
-      // ------------------------------------------------------------
-      public List<Dictionary<string, object>> GetThreads()
-      {
-         if (vm == null)
-         {
-            return new List<Dictionary<string, object>>();
-         }
-
-         return vm.GetThreads().Select
-         (
-            t => new Dictionary<string, object>
-            {
-               ["id"]    = t.Id,
-               ["name"]  = t.Name ?? "",
-               ["state"] = t.ThreadState.ToString()
-            }
-         ).ToList();
-      }
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Returns stack frames for the given thread.
+      /// Gets stack frames for a thread.
       /// </summary>
       // ------------------------------------------------------------
       public List<Dictionary<string, object>> GetStackFrames
@@ -846,54 +976,67 @@ namespace MonoDebug
          long threadId, bool full = false
       )
       {
-         if (vm == null)
-         {
-            return new List<Dictionary<string, object>>();
-         }
-
+         var result = new List<Dictionary<string, object>>();
          var thread = ResolveThread(threadId);
 
          if (thread == null)
          {
-            return new List<Dictionary<string, object>>();
+            return result;
          }
 
-         var frames = thread.GetFrames();
-         var result = new List<Dictionary<string, object>>();
-
-         for (int i = 0; i < frames.Length; i++)
+         try
          {
-            var f    = frames[i];
-            var dict = new Dictionary<string, object>
-            {
-               ["index"]  = i,
-               ["method"] = f.Method?.FullName ?? "",
-               ["file"]   = f.FileName ?? "",
-               ["line"]   = f.LineNumber
-            };
+            var frames = thread.GetFrames();
 
-            if (full)
+            for (int i = 0; i < frames.Length; i++)
             {
-               dict["this"]   = StackInspector.GetThisValue(f, 1);
-               dict["args"]   = StackInspector.GetArgValues(f);
-               dict["locals"] = StackInspector.GetLocalValues(f);
+               var frame = frames[i];
+               var dict  = new Dictionary<string, object>
+               {
+                  ["index"]  = i,
+                  ["method"] = frame.Method.FullName
+               };
+
+               if (frame.Location != null)
+               {
+                  dict["file"] = frame.Location.SourceFile;
+                  dict["line"] = frame.Location.LineNumber;
+               }
+
+               if (full)
+               {
+                  dict["this"]   = StackInspector.GetThisValue
+                  (
+                     frame, 1
+                  );
+
+                  dict["args"]   = StackInspector.GetArgValues
+                  (
+                     frame, 1
+                  );
+
+                  dict["locals"] = StackInspector.GetLocalValues
+                  (
+                     frame, 1
+                  );
+               }
+
+               result.Add(dict);
             }
-
-            result.Add(dict);
          }
+         catch { }
 
          return result;
       }
 
-      // ----------------------------------------------------------------------
+      // ------------------------------------------------------------
       /// <summary>
-      /// <br/> Returns variables for a single frame as this/args/locals.
-      /// <br/> Replaces the former GetVariablesStructured method.
+      /// Gets variable info for a specific frame.
       /// </summary>
-      // ----------------------------------------------------------------------
+      // ------------------------------------------------------------
       public Dictionary<string, object> GetFrameVariables
       (
-         long threadId, int frameIndex, int depth = 0
+         long threadId, int frameIndex, int depth = 1
       )
       {
          var frame = GetFrame(threadId, frameIndex);
@@ -903,12 +1046,61 @@ namespace MonoDebug
             return null;
          }
 
-         return new Dictionary<string, object>
+         try
          {
-            ["this"]   = StackInspector.GetThisValue(frame, Math.Max(depth, 1)),
-            ["args"]   = StackInspector.GetArgValues(frame, depth),
-            ["locals"] = StackInspector.GetLocalValues(frame, depth)
-         };
+            return new Dictionary<string, object>
+            {
+               ["this"]   = StackInspector.GetThisValue
+               (
+                  frame, depth
+               ),
+
+               ["args"]   = StackInspector.GetArgValues
+               (
+                  frame, depth
+               ),
+
+               ["locals"] = StackInspector.GetLocalValues
+               (
+                  frame, depth
+               )
+            };
+         }
+         catch
+         {
+            return null;
+         }
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Gets all threads as a list of dictionaries.
+      /// </summary>
+      // ------------------------------------------------------------
+      public List<Dictionary<string, object>> GetThreads()
+      {
+         var result = new List<Dictionary<string, object>>();
+
+         if (VirtualMachine == null)
+         {
+            return result;
+         }
+
+         try
+         {
+            foreach (var thread in VirtualMachine.GetThreads())
+            {
+               result.Add(new Dictionary<string, object>
+               {
+                  ["id"]    = thread.Id,
+                  ["name"]  = thread.Name ?? "",
+                  ["state"] = thread.ThreadState.ToString()
+               });
+            }
+         }
+         catch { }
+
+         return result;
       }
 
    #endregion
@@ -917,22 +1109,35 @@ namespace MonoDebug
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Resolves a hostname to an IP address string.
+      /// Gets a raw SDB StackFrame for the given thread/frame.
       /// </summary>
       // ------------------------------------------------------------
-      private static string ResolveHost(string host)
+      private SdbStackFrame GetFrame(long threadId, int frameIndex)
       {
-         if (host == "localhost")
+         var thread = ResolveThread(threadId);
+
+         if (thread == null)
          {
-            return "127.0.0.1";
+            return null;
          }
 
-         return host;
+         try
+         {
+            var frames = thread.GetFrames();
+
+            if (frameIndex < frames.Length)
+            {
+               return frames[frameIndex];
+            }
+         }
+         catch { }
+
+         return null;
       }
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Resolves thread by ID, preferring StoppedThread.
+      /// Resolves thread by ID.
       /// </summary>
       // ------------------------------------------------------------
       private ThreadMirror ResolveThread(long threadId)
@@ -942,59 +1147,24 @@ namespace MonoDebug
             return StoppedThread;
          }
 
-         return vm.GetThreads().FirstOrDefault(t => t.Id == threadId);
-      }
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Resolves a stack frame by thread ID and index.
-      /// </summary>
-      // ------------------------------------------------------------
-      private StackFrame GetFrame(long threadId, int frameIndex)
-      {
-         if (vm == null)
+         if (VirtualMachine == null)
          {
             return null;
          }
 
-         var thread = ResolveThread(threadId);
-
-         if (thread == null)
-         {
-            return null;
-         }
-
-         var frames = thread.GetFrames();
-
-         if (frameIndex >= 0 && frameIndex < frames.Length)
-         {
-            return frames[frameIndex];
-         }
-
-         return null;
-      }
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Fills file and line from the top frame of a thread.
-      /// </summary>
-      // ------------------------------------------------------------
-      private void FillLocation
-      (
-         Dictionary<string, object> dict, ThreadMirror thread
-      )
-      {
          try
          {
-            var frames = thread.GetFrames();
-
-            if (frames.Length > 0)
+            foreach (var thread in VirtualMachine.GetThreads())
             {
-               dict["file"] = frames[0].FileName ?? "";
-               dict["line"] = frames[0].LineNumber;
+               if (thread.Id == threadId)
+               {
+                  return thread;
+               }
             }
          }
          catch { }
+
+         return null;
       }
 
    #endregion

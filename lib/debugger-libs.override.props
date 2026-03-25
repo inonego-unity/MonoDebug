@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <NuGetVersionRoslyn>4.8.0</NuGetVersionRoslyn>
+    <NuGetVersionCecil>0.11.5</NuGetVersionCecil>
+    <SystemBuffersVersion>4.5.1</SystemBuffersVersion>
+    <NuGetVersionSystemCollectionsImmutable>8.0.0</NuGetVersionSystemCollectionsImmutable>
+  </PropertyGroup>
+</Project>

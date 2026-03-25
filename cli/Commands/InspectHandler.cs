@@ -289,8 +289,7 @@ namespace MonoDebug.Commands
       // ------------------------------------------------------------
       /// <summary>
       /// Handles expression evaluation in the current debugging
-      /// context.
-      /// <br/> eval '&lt;expr&gt;' [--range start count]
+      /// context. Supports full C# expressions via Roslyn.
       /// </summary>
       // ------------------------------------------------------------
       public static string HandleEval

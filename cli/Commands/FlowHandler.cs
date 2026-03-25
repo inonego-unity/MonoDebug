@@ -134,8 +134,71 @@ namespace MonoDebug
             context.CurrentFrame    = 0;
          }
 
+         // Auto-evaluate expressions on breakpoint hit
+         if (reason == "breakpoint")
+         {
+            EvalBreakpointExpressions(context, evt);
+         }
+
          evt["success"] = true;
          return JsonSerializer.Serialize(evt);
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Evaluates EvalExpressions attached to the hit breakpoint
+      /// and adds results to the event dictionary.
+      /// </summary>
+      // ------------------------------------------------------------
+      private static void EvalBreakpointExpressions
+      (
+         DebugContext context,
+         Dictionary<string, object> evt
+      )
+      {
+         // Find which breakpoint was hit by matching file:line
+         string file = evt.ContainsKey("file")
+            ? evt["file"]?.ToString() : "";
+
+         int line = evt.ContainsKey("line") && evt["line"] is int ln
+            ? ln : 0;
+
+         if (string.IsNullOrEmpty(file) || line <= 0)
+         {
+            return;
+         }
+
+         // Search all profiles for a BP at this location
+         foreach (var bp in context.Profiles.AllBreakPoints())
+         {
+            if (bp.EvalExpressions == null
+               || bp.EvalExpressions.Count == 0)
+            {
+               continue;
+            }
+
+            // Match by file ending and line
+            if (line == bp.Line
+               && file.EndsWith(bp.File, System.StringComparison.OrdinalIgnoreCase))
+            {
+               var results = new Dictionary<string, object>();
+
+               foreach (var expr in bp.EvalExpressions)
+               {
+                  var val = context.Session.Evaluate
+                  (
+                     context.CurrentThreadId,
+                     context.CurrentFrame,
+                     expr
+                  );
+
+                  results[expr] = val;
+               }
+
+               evt["eval"] = results;
+               return;
+            }
+         }
       }
 
    #endregion
@@ -369,6 +432,13 @@ namespace MonoDebug
       private static string HandlePause(DebugContext context)
       {
          context.Session.Suspend();
+
+         if (context.Session.StoppedThread != null)
+         {
+            context.CurrentThreadId = context.Session.StoppedThread.Id;
+            context.CurrentFrame    = 0;
+         }
+
          return IpcResponse.Success("Suspended.").RawJson;
       }
 

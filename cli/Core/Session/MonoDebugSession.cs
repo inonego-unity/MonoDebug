@@ -473,7 +473,7 @@ namespace MonoDebug
       /// Suspends VM execution.
       /// </summary>
       // ------------------------------------------------------------
-      public new void Suspend()
+      public void Suspend()
       {
          if (VirtualMachine == null)
          {

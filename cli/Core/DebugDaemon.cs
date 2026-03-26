@@ -11,6 +11,8 @@ using Mono.Debugger.Soft;
 
 using InoIPC;
 
+using InoCLI;
+
 using MonoDebug.Commands;
 
 namespace MonoDebug
@@ -31,9 +33,9 @@ namespace MonoDebug
       private readonly string profilesPath;
 
       private MonoDebugSession session;
-      private DebugContext     context;
 
-      private NamedPipeServer  server;
+      private NamedPipeServer   server;
+      private CommandRegistry   registry;
 
    #endregion
 
@@ -75,13 +77,18 @@ namespace MonoDebug
 
          Console.Error.WriteLine($"Connected to {host}:{port}.");
 
-         // Initialize context
+         // Initialize context (singleton for command handlers)
          var profiles = new ProfileCollection(profilesPath);
-         context = new DebugContext(session, profiles);
+
+         DebugContext.Current = new DebugContext(session, profiles);
 
          // Restore saved debug points from profiles
          profiles.Load();
          profiles.RebuildAll(session);
+
+         // Initialize command registry
+         registry = new CommandRegistry();
+         registry.Initialize(typeof(DebugDaemon).Assembly);
 
          // Write ready signal to stdout (CLI reads this)
          Console.WriteLine
@@ -158,49 +165,116 @@ namespace MonoDebug
 
    #endregion
 
-   #region Status
+   #region Status / Detach
 
       // ------------------------------------------------------------
       /// <summary>
       /// Returns daemon and session status as JSON.
       /// </summary>
       // ------------------------------------------------------------
-      private string HandleStatus(bool full)
+      [CLICommand("status", description = "Daemon status")]
+      public static string HandleStatus(CommandArgs args)
       {
+         var context = DebugContext.Current;
+
          var result = new Dictionary<string, object>
          {
             ["connected"] = context.Session.IsConnected,
             ["suspended"] = context.Session.IsSuspended,
-            ["port"]      = port,
-            ["host"]      = host
+            ["port"]      = context.Session.Port,
+            ["host"]      = context.Session.Host
          };
 
-         if (full)
+         if (args.Has("full"))
          {
-            result["pipe"]    = $"{Constants.PipePrefix}{port}";
+            result["pipe"]    = $"{Constants.PipePrefix}{context.Session.Port}";
             result["threads"] = context.Session.GetThreads();
          }
 
          return IpcResponse.Success(result).RawJson;
       }
 
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Detaches from the VM, saves profiles, and stops server.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("detach", description = "Detach from VM")]
+      public static string HandleDetach(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         context.Profiles.Save();
+         context.Session.Disconnect();
+
+         return IpcResponse.Success("Detached.").RawJson;
+      }
+
    #endregion
 
    #region Dispatch
 
-      // ------------------------------------------------------------
+      // ----------------------------------------------------------------------
       /// <summary>
-      /// Parses the JSON request and dispatches to the appropriate
-      /// handler based on positionals[0].
+      /// <br/> Parses the JSON request into CommandArgs and resolves
+      /// <br/> via CommandRegistry.
       /// </summary>
-      // ------------------------------------------------------------
+      // ----------------------------------------------------------------------
       private string Dispatch(string requestJson)
       {
-         var doc  = JsonDocument.Parse(requestJson);
+         var parsed = ParseRequest(requestJson);
+
+         try
+         {
+            var (info, args) = registry.Resolve(parsed);
+
+            string result = (string)info.Method.Invoke(null, new object[] { args });
+
+            // detach command: also stop the server
+            if (info.Key == "detach")
+            {
+               server?.Stop();
+            }
+
+            return result;
+         }
+         catch (ArgumentException ex)
+         {
+            return IpcResponse.Error
+            (
+               Constants.Error.InvalidArgs, ex.Message
+            ).RawJson;
+         }
+         catch (System.Reflection.TargetInvocationException ex)
+         {
+            var inner = ex.InnerException ?? ex;
+            return IpcResponse.Error
+            (
+               Constants.Error.InvalidArgs, inner.Message
+            ).RawJson;
+         }
+         catch (Exception ex)
+         {
+            return IpcResponse.Error
+            (
+               Constants.Error.InvalidArgs, ex.Message
+            ).RawJson;
+         }
+      }
+
+      // ----------------------------------------------------------------------
+      /// <summary>
+      /// <br/> Parses JSON request into CommandArgs.
+      /// <br/> Format: {"positionals":[...],"optionals":{...}}
+      /// </summary>
+      // ----------------------------------------------------------------------
+      private static CommandArgs ParseRequest(string json)
+      {
+         var doc  = JsonDocument.Parse(json);
          var root = doc.RootElement;
 
          var positionals = new List<string>();
-         var optionals   = new Dictionary<string, JsonElement>();
+         var optionals   = new Dictionary<string, List<string>>();
 
          if (root.TryGetProperty("positionals", out var posProp))
          {
@@ -214,106 +288,29 @@ namespace MonoDebug
          {
             foreach (var p in optProp.EnumerateObject())
             {
-               optionals[p.Name] = p.Value;
+               var values = new List<string>();
+
+               if (p.Value.ValueKind == JsonValueKind.Array)
+               {
+                  foreach (var v in p.Value.EnumerateArray())
+                  {
+                     values.Add(v.GetString());
+                  }
+               }
+               else if (p.Value.ValueKind != JsonValueKind.Null)
+               {
+                  values.Add(p.Value.ToString());
+               }
+
+               optionals[p.Name] = values;
             }
          }
 
-         string group = positionals.Count > 0 ? positionals[0] : "";
-         var    args  = positionals.Count > 1
-            ? positionals.GetRange(1, positionals.Count - 1)
-            : new List<string>();
-
-         switch (group)
+         return new CommandArgs
          {
-            case "status":
-            {
-               return HandleStatus(optionals.ContainsKey("full"));
-            }
-
-            case "detach":
-            {
-               context.Profiles.Save();
-
-               context.Session.Disconnect();
-
-               server?.Stop();
-
-               return IpcResponse.Success("Detached.").RawJson;
-            }
-
-            case "flow":
-            {
-               return FlowHandler.Handle
-               (
-                  context, args, optionals
-               );
-            }
-
-            case "stack":
-            {
-               return InspectHandler.HandleStack
-               (
-                  context, args, optionals
-               );
-            }
-
-            case "thread":
-            {
-               return InspectHandler.HandleThread
-               (
-                  context, args, optionals
-               );
-            }
-
-            case "vars":
-            {
-               return InspectHandler.HandleVars
-               (
-                  context, args, optionals
-               );
-            }
-
-            case "eval":
-            {
-               return InspectHandler.HandleEval
-               (
-                  context, args, optionals
-               );
-            }
-
-            case "break":
-            {
-               return BreakHandler.HandleBreak
-               (
-                  context, args, optionals
-               );
-            }
-
-            case "catch":
-            {
-               return BreakHandler.HandleCatch
-               (
-                  context, args, optionals
-               );
-            }
-
-            case "profile":
-            {
-               return ProfileHandler.Handle
-               (
-                  context, args, optionals
-               );
-            }
-
-            default:
-            {
-               return IpcResponse.Error
-               (
-                  Constants.Error.InvalidArgs,
-                  $"Unknown command group: {group}"
-               ).RawJson;
-            }
-         }
+            Positionals = positionals,
+            Optionals   = optionals
+         };
       }
 
    #endregion

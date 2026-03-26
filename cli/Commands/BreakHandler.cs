@@ -2,12 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Text.Json;
-
-using Mono.Debugger.Soft;
 
 using InoIPC;
+
+using InoCLI;
 
 namespace MonoDebug
 {
@@ -19,151 +17,18 @@ namespace MonoDebug
    static class BreakHandler
    {
 
-   #region Break
+   #region Break Set
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Handles break subcommands (set, remove, list, enable,
-      /// disable) for location breakpoints.
+      /// Creates a new location breakpoint.
       /// </summary>
       // ------------------------------------------------------------
-      public static string HandleBreak
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("break", "set", description = "Set breakpoint")]
+      public static string BreakSet(CommandArgs args)
       {
-         string command = args.Count > 0 ? args[0] : "";
-         var    rest    = args.Count > 1
-            ? args.GetRange(1, args.Count - 1)
-            : new List<string>();
+         var context = DebugContext.Current;
 
-         switch (command)
-         {
-            case "remove":
-            {
-               if (optionals.Has("all"))
-               {
-                  string profileName = optionals.GetString("profile");
-                  int    count       = 0;
-
-                  if (!string.IsNullOrEmpty(profileName))
-                  {
-                     var profile = context.Profiles.Get(profileName);
-
-                     if (profile != null)
-                     {
-                        count = profile.RemoveAllBreakPoints();
-                     }
-                  }
-                  else
-                  {
-                     foreach (var profile in context.Profiles.List())
-                     {
-                        count += profile.RemoveAllBreakPoints();
-                     }
-                  }
-
-                  return IpcResponse.Success($"Removed {count} breakpoints.").RawJson;
-               }
-
-               if (!rest.TryParseId(out int id))
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
-               }
-
-               if (!context.Profiles.RemovePoint(id))
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, $"Breakpoint #{id} not found.").RawJson;
-               }
-
-               return IpcResponse.Success($"Removed breakpoint #{id}.").RawJson;
-            }
-
-            case "list":
-            {
-               string profileName = optionals.GetString("profile");
-
-               List<BreakPoint> bps;
-
-               if (!string.IsNullOrEmpty(profileName))
-               {
-                  var profile = context.Profiles.Get(profileName);
-                  bps = profile != null
-                     ? profile.BreakPoints.Values.ToList()
-                     : new List<BreakPoint>();
-               }
-               else
-               {
-                  bps = context.Profiles.AllBreakPoints();
-               }
-
-               var list = bps.Select(b => b.ToDict()).ToList();
-               return IpcResponse.Success("breakpoints", list).RawJson;
-            }
-
-            case "enable":
-            {
-               if (!rest.TryParseId(out int id))
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
-               }
-
-               foreach (var profile in context.Profiles.List())
-               {
-                  if (profile.Enable(id))
-                  {
-                     return IpcResponse.Success($"Enabled breakpoint #{id}.").RawJson;
-                  }
-               }
-
-               return IpcResponse.Error(Constants.Error.InvalidArgs, $"Breakpoint #{id} not found.").RawJson;
-            }
-
-            case "disable":
-            {
-               if (!rest.TryParseId(out int id))
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
-               }
-
-               foreach (var profile in context.Profiles.List())
-               {
-                  if (profile.Disable(id))
-                  {
-                     return IpcResponse.Success($"Disabled breakpoint #{id}.").RawJson;
-                  }
-               }
-
-               return IpcResponse.Error(Constants.Error.InvalidArgs, $"Breakpoint #{id} not found.").RawJson;
-            }
-
-            case "set":
-               return SetBreakpoint(context, rest, optionals);
-
-            default:
-            {
-               return IpcResponse.Error
-               (
-                  Constants.Error.InvalidArgs,
-                  $"Unknown break command: {command}"
-               ).RawJson;
-            }
-         }
-      }
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Parses file/line arguments and optionals, then creates a
-      /// new breakpoint entry via the owning DebugProfile.
-      /// </summary>
-      // ------------------------------------------------------------
-      private static string SetBreakpoint
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
-      {
          if (args.Count < 2)
          {
             return IpcResponse.Error
@@ -174,9 +39,7 @@ namespace MonoDebug
          }
 
          string file = args[0];
-         int    line = 0;
-
-         int.TryParse(args[1], out line);
+         int    line = args.GetInt(1, 0);
 
          if (line <= 0)
          {
@@ -187,33 +50,18 @@ namespace MonoDebug
             ).RawJson;
          }
 
-         // Extract optionals
-         string condition   = optionals.GetString("condition");
-         int    hitCount    = optionals.GetInt("hit-count");
-         long   thread      = optionals.GetLong("thread");
-         bool   temp        = optionals.Has("temp");
-         string profileName = optionals.GetString("profile", "default");
-         string desc        = optionals.GetString("desc");
+         string condition   = args.Get("condition");
+         int    hitCount    = args.GetInt("hit-count", 0);
+         long   thread      = args.GetLong("thread", 0);
+         bool   temp        = args.Has("temp");
+         string profileName = args.Get("profile", "default");
+         string desc        = args.Get("desc");
 
          List<string> evals = null;
 
-         if (optionals.Has("eval"))
+         if (args.Has("eval"))
          {
-            var evalProp = optionals["eval"];
-
-            if (evalProp.ValueKind == JsonValueKind.Array)
-            {
-               evals = new List<string>();
-
-               foreach (var e in evalProp.EnumerateArray())
-               {
-                  evals.Add(e.GetString());
-               }
-            }
-            else
-            {
-               evals = new List<string> { evalProp.GetString() };
-            }
+            evals = args.All("eval", new List<string>());
          }
 
          var profile = context.Profiles.Get(profileName ?? "default");
@@ -240,169 +88,174 @@ namespace MonoDebug
 
    #endregion
 
-   #region Catch
+   #region Break Remove
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Handles catch subcommands (set, remove, list, enable,
-      /// disable, info) for exception catchpoints.
+      /// Removes a breakpoint by ID, or all with --all.
       /// </summary>
       // ------------------------------------------------------------
-      public static string HandleCatch
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("break", "remove", description = "Remove breakpoint")]
+      public static string BreakRemove(CommandArgs args)
       {
-         string command = args.Count > 0 ? args[0] : "";
-         var    rest    = args.Count > 1
-            ? args.GetRange(1, args.Count - 1)
-            : new List<string>();
+         var context = DebugContext.Current;
 
-         switch (command)
+         if (args.Has("all"))
          {
-            case "remove":
+            string profileName = args.Get("profile");
+            int    count       = 0;
+
+            if (!string.IsNullOrEmpty(profileName))
             {
-               if (optionals.Has("all"))
+               var profile = context.Profiles.Get(profileName);
+
+               if (profile != null)
                {
-                  string profileName = optionals.GetString("profile");
-                  int    count       = 0;
-
-                  if (!string.IsNullOrEmpty(profileName))
-                  {
-                     var profile = context.Profiles.Get(profileName);
-
-                     if (profile != null)
-                     {
-                        count = profile.RemoveAllCatchPoints();
-                     }
-                  }
-                  else
-                  {
-                     foreach (var profile in context.Profiles.List())
-                     {
-                        count += profile.RemoveAllCatchPoints();
-                     }
-                  }
-
-                  return IpcResponse.Success($"Removed {count} catchpoints.").RawJson;
+                  count = profile.RemoveAllBreakPoints();
                }
-
-               if (!rest.TryParseId(out int id))
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
-               }
-
-               if (!context.Profiles.RemovePoint(id))
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, $"Catchpoint #{id} not found.").RawJson;
-               }
-
-               return IpcResponse.Success($"Removed catchpoint #{id}.").RawJson;
             }
-
-            case "list":
+            else
             {
-               var list = context.Profiles.AllCatchPoints()
-                  .Select(c => c.ToDict())
-                  .ToList();
-
-               return IpcResponse.Success("catchpoints", list).RawJson;
-            }
-
-            case "enable":
-            {
-               if (!rest.TryParseId(out int id))
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
-               }
-
                foreach (var profile in context.Profiles.List())
                {
-                  if (profile.Enable(id))
-                  {
-                     return IpcResponse.Success($"Enabled catchpoint #{id}.").RawJson;
-                  }
+                  count += profile.RemoveAllBreakPoints();
                }
-
-               return IpcResponse.Error(Constants.Error.InvalidArgs, $"Catchpoint #{id} not found.").RawJson;
             }
 
-            case "disable":
+            return IpcResponse.Success($"Removed {count} breakpoints.").RawJson;
+         }
+
+         if (!int.TryParse(args[0], out int id))
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
+         }
+
+         if (!context.Profiles.RemovePoint(id))
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, $"Breakpoint #{id} not found.").RawJson;
+         }
+
+         return IpcResponse.Success($"Removed breakpoint #{id}.").RawJson;
+      }
+
+   #endregion
+
+   #region Break List
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Lists breakpoints, optionally filtered by --profile.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("break", "list", description = "List breakpoints")]
+      public static string BreakList(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         string profileName = args.Get("profile");
+
+         List<BreakPoint> bps;
+
+         if (!string.IsNullOrEmpty(profileName))
+         {
+            var profile = context.Profiles.Get(profileName);
+            bps = profile != null
+               ? profile.BreakPoints.Values.ToList()
+               : new List<BreakPoint>();
+         }
+         else
+         {
+            bps = context.Profiles.AllBreakPoints();
+         }
+
+         var list = bps.Select(b => b.ToDict()).ToList();
+         return IpcResponse.Success("breakpoints", list).RawJson;
+      }
+
+   #endregion
+
+   #region Break Enable / Disable
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Enables a breakpoint by ID.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("break", "enable", description = "Enable breakpoint")]
+      public static string BreakEnable(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         if (!int.TryParse(args[0], out int id))
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
+         }
+
+         foreach (var profile in context.Profiles.List())
+         {
+            if (profile.Enable(id))
             {
-               if (!rest.TryParseId(out int id))
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
-               }
-
-               foreach (var profile in context.Profiles.List())
-               {
-                  if (profile.Disable(id))
-                  {
-                     return IpcResponse.Success($"Disabled catchpoint #{id}.").RawJson;
-                  }
-               }
-
-               return IpcResponse.Error(Constants.Error.InvalidArgs, $"Catchpoint #{id} not found.").RawJson;
-            }
-
-            case "info":
-            {
-               bool hasInner  = optionals.Has("inner");
-               int  innerDep  = hasInner ? optionals.GetInt("inner") : 0;
-               bool hasStack  = optionals.Has("stack");
-
-               var info = context.Session.GetExceptionInfo(hasStack, innerDep);
-
-               if (info == null)
-               {
-                  return IpcResponse.Error(Constants.Error.InvalidArgs, "No current exception.").RawJson;
-               }
-
-               return IpcResponse.Success("exception", info).RawJson;
-            }
-
-            case "set":
-               return SetCatchpoint(context, rest, optionals);
-
-            default:
-            {
-               return IpcResponse.Error
-               (
-                  Constants.Error.InvalidArgs,
-                  $"Unknown catch command: {command}"
-               ).RawJson;
+               return IpcResponse.Success($"Enabled breakpoint #{id}.").RawJson;
             }
          }
+
+         return IpcResponse.Error(Constants.Error.InvalidArgs, $"Breakpoint #{id} not found.").RawJson;
       }
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Parses the exception type and optionals, then creates a
-      /// new catchpoint entry via the owning DebugProfile.
+      /// Disables a breakpoint by ID.
       /// </summary>
       // ------------------------------------------------------------
-      private static string SetCatchpoint
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("break", "disable", description = "Disable breakpoint")]
+      public static string BreakDisable(CommandArgs args)
       {
-         string typeName = args.Count > 0 ? args[0] : "";
-         bool   all        = optionals.Has("all");
-         bool   unhandled  = optionals.Has("unhandled");
+         var context = DebugContext.Current;
+
+         if (!int.TryParse(args[0], out int id))
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, "Breakpoint ID required.").RawJson;
+         }
+
+         foreach (var profile in context.Profiles.List())
+         {
+            if (profile.Disable(id))
+            {
+               return IpcResponse.Success($"Disabled breakpoint #{id}.").RawJson;
+            }
+         }
+
+         return IpcResponse.Error(Constants.Error.InvalidArgs, $"Breakpoint #{id} not found.").RawJson;
+      }
+
+   #endregion
+
+   #region Catch Set
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Creates a new exception catchpoint.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("catch", "set", description = "Set catchpoint")]
+      public static string CatchSet(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         string typeName  = args[0] ?? "";
+         bool   all       = args.Has("all");
+         bool   unhandled = args.Has("unhandled");
 
          if (all)
          {
             typeName = "(all)";
          }
 
-         // Extract optionals
-         string condition   = optionals.GetString("condition");
-         int    hitCount    = optionals.GetInt("hit-count");
-         long   thread      = optionals.GetLong("thread");
-         string profileName = optionals.GetString("profile", "default");
-         string desc        = optionals.GetString("desc");
+         string condition   = args.Get("condition");
+         int    hitCount    = args.GetInt("hit-count", 0);
+         long   thread      = args.GetLong("thread", 0);
+         string profileName = args.Get("profile", "default");
+         string desc        = args.Get("desc");
 
          bool caughtOnly   = !unhandled && !all;
          bool uncaughtOnly = unhandled;
@@ -428,6 +281,163 @@ namespace MonoDebug
          }
 
          return IpcResponse.Success("catchpoint", cp.ToDict()).RawJson;
+      }
+
+   #endregion
+
+   #region Catch Remove
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Removes a catchpoint by ID, or all with --all.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("catch", "remove", description = "Remove catchpoint")]
+      public static string CatchRemove(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         if (args.Has("all"))
+         {
+            string profileName = args.Get("profile");
+            int    count       = 0;
+
+            if (!string.IsNullOrEmpty(profileName))
+            {
+               var profile = context.Profiles.Get(profileName);
+
+               if (profile != null)
+               {
+                  count = profile.RemoveAllCatchPoints();
+               }
+            }
+            else
+            {
+               foreach (var profile in context.Profiles.List())
+               {
+                  count += profile.RemoveAllCatchPoints();
+               }
+            }
+
+            return IpcResponse.Success($"Removed {count} catchpoints.").RawJson;
+         }
+
+         if (!int.TryParse(args[0], out int id))
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
+         }
+
+         if (!context.Profiles.RemovePoint(id))
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, $"Catchpoint #{id} not found.").RawJson;
+         }
+
+         return IpcResponse.Success($"Removed catchpoint #{id}.").RawJson;
+      }
+
+   #endregion
+
+   #region Catch List
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Lists all catchpoints.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("catch", "list", description = "List catchpoints")]
+      public static string CatchList(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         var list = context.Profiles.AllCatchPoints()
+            .Select(c => c.ToDict())
+            .ToList();
+
+         return IpcResponse.Success("catchpoints", list).RawJson;
+      }
+
+   #endregion
+
+   #region Catch Enable / Disable
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Enables a catchpoint by ID.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("catch", "enable", description = "Enable catchpoint")]
+      public static string CatchEnable(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         if (!int.TryParse(args[0], out int id))
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
+         }
+
+         foreach (var profile in context.Profiles.List())
+         {
+            if (profile.Enable(id))
+            {
+               return IpcResponse.Success($"Enabled catchpoint #{id}.").RawJson;
+            }
+         }
+
+         return IpcResponse.Error(Constants.Error.InvalidArgs, $"Catchpoint #{id} not found.").RawJson;
+      }
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Disables a catchpoint by ID.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("catch", "disable", description = "Disable catchpoint")]
+      public static string CatchDisable(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         if (!int.TryParse(args[0], out int id))
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, "Catchpoint ID required.").RawJson;
+         }
+
+         foreach (var profile in context.Profiles.List())
+         {
+            if (profile.Disable(id))
+            {
+               return IpcResponse.Success($"Disabled catchpoint #{id}.").RawJson;
+            }
+         }
+
+         return IpcResponse.Error(Constants.Error.InvalidArgs, $"Catchpoint #{id} not found.").RawJson;
+      }
+
+   #endregion
+
+   #region Catch Info
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Shows current exception info.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("catch", "info", description = "Exception info")]
+      public static string CatchInfo(CommandArgs args)
+      {
+         var context = DebugContext.Current;
+
+         bool hasInner = args.Has("inner");
+         int  innerDep = hasInner ? args.GetInt("inner", 0) : 0;
+         bool hasStack = args.Has("stack");
+
+         var info = context.Session.GetExceptionInfo(hasStack, innerDep);
+
+         if (info == null)
+         {
+            return IpcResponse.Error(Constants.Error.InvalidArgs, "No current exception.").RawJson;
+         }
+
+         return IpcResponse.Success("exception", info).RawJson;
       }
 
    #endregion

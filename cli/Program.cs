@@ -78,7 +78,7 @@ Reference: {claudeMd}"
       /// ready signal.
       /// </summary>
       // ------------------------------------------------------------
-      static int HandleAttach(ParsedArgs parsed)
+      static int HandleAttach(CommandArgs parsed)
       {
          if (!parsed.Has(1))
          {
@@ -170,7 +170,7 @@ Reference: {claudeMd}"
       /// Runs the daemon in foreground (internal, invoked by attach).
       /// </summary>
       // ------------------------------------------------------------
-      static int HandleDaemon(ParsedArgs parsed)
+      static int HandleDaemon(CommandArgs parsed)
       {
          if (!parsed.Has(1))
          {
@@ -205,7 +205,7 @@ Reference: {claudeMd}"
       /// Builds a JSON request from parsed args.
       /// </summary>
       // ------------------------------------------------------------
-      static string BuildRequest(ParsedArgs parsed)
+      static string BuildRequest(CommandArgs parsed)
       {
          var req = new Dictionary<string, object>
          {

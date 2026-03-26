@@ -2,12 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Text.Json;
-
-using Mono.Debugger.Soft;
 
 using InoIPC;
+
+using InoCLI;
 
 namespace MonoDebug.Commands
 {
@@ -29,12 +27,11 @@ namespace MonoDebug.Commands
       /// <br/> stack frame &lt;n&gt;
       /// </summary>
       // ------------------------------------------------------------
-      public static string HandleStack
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("stack", description = "Stack trace and frame selection")]
+      public static string HandleStack(CommandArgs args)
       {
+         var context = DebugContext.Current;
+
          if (!context.Session.IsSuspended)
          {
             return IpcResponse.Error
@@ -44,15 +41,12 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
-         string command = args.Count > 0 ? args[0] : "";
-         var    rest    = args.Count > 1
-            ? args.GetRange(1, args.Count - 1)
-            : new List<string>();
+         string command = args[0] ?? "";
 
          // stack frame <n>
          if (command == "frame")
          {
-            if (!rest.TryParseId(out int n))
+            if (!int.TryParse(args[1], out int n))
             {
                return IpcResponse.Error
                (
@@ -65,8 +59,8 @@ namespace MonoDebug.Commands
             return IpcResponse.Success("frame", context.CurrentFrame).RawJson;
          }
 
-         bool full = optionals.Has("full");
-         bool all  = optionals.Has("all");
+         bool full = args.Has("full");
+         bool all  = args.Has("all");
 
          // stack --all : all threads
          if (all)
@@ -110,13 +104,12 @@ namespace MonoDebug.Commands
       /// <br/> thread &lt;id&gt;
       /// </summary>
       // ------------------------------------------------------------
-      public static string HandleThread
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("thread", description = "Thread listing and switching")]
+      public static string HandleThread(CommandArgs args)
       {
-         string command = args.Count > 0 ? args[0] : "";
+         var context = DebugContext.Current;
+
+         string command = args[0] ?? "";
 
          // thread list
          if (command == "list")
@@ -151,12 +144,11 @@ namespace MonoDebug.Commands
       /// <br/> vars set &lt;var&gt; &lt;value&gt; [--static]
       /// </summary>
       // -----------------------------------------------------------------------
-      public static string HandleVars
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("vars", description = "Variable inspection and modification")]
+      public static string HandleVars(CommandArgs args)
       {
+         var context = DebugContext.Current;
+
          if (!context.Session.IsSuspended)
          {
             return IpcResponse.Error
@@ -166,16 +158,12 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
-         string command = args.Count > 0 ? args[0] : "";
+         string command = args[0] ?? "";
 
          // vars set <var> <value>
          if (command == "set")
          {
-            var rest = args.Count > 1
-               ? args.GetRange(1, args.Count - 1)
-               : new List<string>();
-
-            if (rest.Count < 2)
+            if (args.Count < 3)
             {
                return IpcResponse.Error
                (
@@ -184,8 +172,8 @@ namespace MonoDebug.Commands
                ).RawJson;
             }
 
-            string name  = rest[0];
-            string value = rest[1];
+            string name  = args[1];
+            string value = args[2];
 
             if (!context.Session.SetVariable
             (
@@ -207,9 +195,9 @@ namespace MonoDebug.Commands
          }
 
          // --static '<type>' : static field inspection
-         if (optionals.Has("static"))
+         if (args.Has("static"))
          {
-            string typeName = optionals.GetString("static");
+            string typeName = args.Get("static");
 
             if (string.IsNullOrEmpty(typeName))
             {
@@ -241,7 +229,7 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
-         int depth = optionals.GetInt("depth", 1);
+         int depth = args.GetInt("depth", 1);
 
          var data = context.Session.GetFrameVariables
          (
@@ -264,11 +252,11 @@ namespace MonoDebug.Commands
             ["frame"]  = context.CurrentFrame
          };
 
-         if (optionals.Has("args"))
+         if (args.Has("args"))
          {
             result["args"] = data["args"];
          }
-         else if (optionals.Has("locals"))
+         else if (args.Has("locals"))
          {
             result["locals"] = data["locals"];
          }
@@ -292,12 +280,11 @@ namespace MonoDebug.Commands
       /// context. Supports full C# expressions via Roslyn.
       /// </summary>
       // ------------------------------------------------------------
-      public static string HandleEval
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("eval", description = "Expression evaluation")]
+      public static string HandleEval(CommandArgs args)
       {
+         var context = DebugContext.Current;
+
          if (!context.Session.IsSuspended)
          {
             return IpcResponse.Error
@@ -307,7 +294,7 @@ namespace MonoDebug.Commands
             ).RawJson;
          }
 
-         string expression = string.Join(" ", args).Trim();
+         string expression = string.Join(" ", args.Positionals).Trim();
 
          if (string.IsNullOrEmpty(expression))
          {
@@ -317,7 +304,8 @@ namespace MonoDebug.Commands
                "Expression required. Use: eval '<expr>'"
             ).RawJson;
          }
-         var    value      = context.Session.Evaluate
+
+         var value = context.Session.Evaluate
          (
             context.CurrentThreadId, context.CurrentFrame, expression
          );

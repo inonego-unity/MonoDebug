@@ -10,6 +10,13 @@ namespace MonoDebug
 
    #region Fields
 
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Global singleton for command handler access.
+      /// </summary>
+      // ------------------------------------------------------------
+      public static DebugContext Current { get; set; }
+
       public MonoDebugSession  Session  { get; set; }
       public ProfileCollection Profiles { get; }
 

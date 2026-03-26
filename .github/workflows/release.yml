@@ -28,6 +28,11 @@ jobs:
     - name: Publish
       run: dotnet publish cli/monodebug.csproj -c Release -o cli/bin/publish
 
+    - name: Clean debug symbols
+      run: |
+        Remove-Item cli/bin/publish/*.pdb -ErrorAction SilentlyContinue
+        Remove-Item cli/bin/publish/*.xml -ErrorAction SilentlyContinue
+
     - name: Copy licenses and docs
       run: |
         Copy-Item LICENSE cli/bin/publish/

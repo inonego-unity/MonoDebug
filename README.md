@@ -43,7 +43,6 @@ cli/
     ├── DebugContext.cs           Shared context (Session + Profiles)
     ├── DebugDaemon.cs            Named Pipe server + dispatch
     ├── Constants.cs              Shared constants + error codes
-    ├── OptionExtensions.cs       Optionals/args helpers
     ├── DebugPoint/
     │   ├── DebugPoint.cs         Abstract base
     │   ├── BreakPoint.cs         Location breakpoint
@@ -229,7 +228,7 @@ dotnet test test/MonoDebug.TEST.csproj
 |------------|---------|---------|
 | [mono/debugger-libs](https://github.com/mono/debugger-libs) | Mono.Debugger.Soft + Mono.Debugging.Soft (SDB + Roslyn eval) | MIT |
 | [Mono.Cecil](https://www.nuget.org/packages/Mono.Cecil) | Assembly metadata (runtime dependency) | MIT |
-| [InoCLI](https://github.com/inonego/InoCLI) | CLI argument parser | MIT |
+| [InoCLI](https://github.com/inonego/InoCLI) | CLI framework (parser + command registry) | MIT |
 | [InoIPC](https://github.com/inonego/InoIPC) | IPC transport + frame protocol | MIT |
 
 ## License

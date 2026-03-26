@@ -9,6 +9,8 @@ using Mono.Debugger.Soft;
 
 using InoIPC;
 
+using InoCLI;
+
 namespace MonoDebug
 {
    // ============================================================
@@ -20,71 +22,6 @@ namespace MonoDebug
    static class FlowHandler
    {
 
-   #region Dispatch
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Dispatches a flow control command and returns a JSON result.
-      /// </summary>
-      // ------------------------------------------------------------
-      public static string Handle
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
-      {
-         string command = args.Count > 0 ? args[0] : "";
-         var    rest    = args.Count > 1
-            ? args.GetRange(1, args.Count - 1)
-            : new List<string>();
-
-         switch (command)
-         {
-            case "wait":
-            {
-               return HandleWait(context, optionals);
-            }
-
-            case "continue":
-            {
-               return HandleContinue(context);
-            }
-
-            case "next":
-            case "step":
-            case "out":
-            {
-               return HandleStep(context, command, optionals);
-            }
-
-            case "until":
-            {
-               return HandleUntil(context, rest);
-            }
-
-            case "goto":
-            {
-               return HandleGoto(context, rest);
-            }
-
-            case "pause":
-            {
-               return HandlePause(context);
-            }
-
-            default:
-            {
-               return IpcResponse.Error
-               (
-                  Constants.Error.InvalidArgs,
-                  $"Unknown flow command: {command}"
-               ).RawJson;
-            }
-         }
-      }
-
-   #endregion
-
    #region Wait
 
       // ------------------------------------------------------------
@@ -93,13 +30,12 @@ namespace MonoDebug
       /// On disconnect, attempts to reconnect and restore breakpoints.
       /// </summary>
       // ------------------------------------------------------------
-      private static string HandleWait
-      (
-         DebugContext context,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("flow", "wait", description = "Wait for debug event")]
+      public static string HandleWait(CommandArgs args)
       {
-         int timeout = optionals.GetInt("timeout", 30000);
+         var context = DebugContext.Current;
+
+         int timeout = args.GetInt("timeout", 30000);
 
          var evt = context.Session.WaitForEvent(timeout);
 
@@ -149,7 +85,7 @@ namespace MonoDebug
                   && threadId != hitBp.ThreadFilter)
                {
                   context.Session.Resume();
-                  return HandleWait(context, optionals);
+                  return HandleWait(args);
                }
 
                // Condition check
@@ -167,7 +103,7 @@ namespace MonoDebug
                      || condResult.ToString() == "False")
                   {
                      context.Session.Resume();
-                     return HandleWait(context, optionals);
+                     return HandleWait(args);
                   }
                }
 
@@ -273,9 +209,10 @@ namespace MonoDebug
       /// Resumes VM execution.
       /// </summary>
       // ------------------------------------------------------------
-      private static string HandleContinue(DebugContext context)
+      [CLICommand("flow", "continue", description = "Resume execution")]
+      public static string HandleContinue(CommandArgs args)
       {
-         context.Session.Resume();
+         DebugContext.Current.Session.Resume();
          return IpcResponse.Success("Resumed.").RawJson;
       }
 
@@ -285,16 +222,38 @@ namespace MonoDebug
 
       // ------------------------------------------------------------
       /// <summary>
-      /// Performs a step operation (next, step, out) with optional
-      /// --count for repeated stepping.
+      /// Step over (next line).
       /// </summary>
       // ------------------------------------------------------------
-      private static string HandleStep
-      (
-         DebugContext context, string command,
-         Dictionary<string, JsonElement> optionals
-      )
+      [CLICommand("flow", "next", description = "Step over")]
+      public static string HandleNext(CommandArgs args) => StepInternal("next", args);
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Step into.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("flow", "step", description = "Step into")]
+      public static string HandleStep(CommandArgs args) => StepInternal("step", args);
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Step out.
+      /// </summary>
+      // ------------------------------------------------------------
+      [CLICommand("flow", "out", description = "Step out")]
+      public static string HandleOut(CommandArgs args) => StepInternal("out", args);
+
+      // ----------------------------------------------------------------------
+      /// <summary>
+      /// <br/> Shared step logic for next/step/out.
+      /// <br/> Supports --count for repeated stepping.
+      /// </summary>
+      // ----------------------------------------------------------------------
+      private static string StepInternal(string command, CommandArgs args)
       {
+         var context = DebugContext.Current;
+
          if (!context.Session.IsSuspended)
          {
             return IpcResponse.Error
@@ -321,7 +280,7 @@ namespace MonoDebug
             _      => StepDepth.Over
          };
 
-         int count = optionals.GetInt("count", 1);
+         int count = args.GetInt("count", 1);
 
          if (count < 1)
          {
@@ -361,40 +320,11 @@ namespace MonoDebug
       /// Args: [file] line.
       /// </summary>
       // ------------------------------------------------------------
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Parses [file] line from args.
-      /// </summary>
-      // ------------------------------------------------------------
-      private static void ParseFileLine
-      (
-         List<string> args, out string file, out int line
-      )
+      [CLICommand("flow", "until", description = "Run to line")]
+      public static string HandleUntil(CommandArgs args)
       {
-         file = "";
-         line = 0;
+         var context = DebugContext.Current;
 
-         if (args.Count == 1)
-         {
-            int.TryParse(args[0], out line);
-         }
-         else if (args.Count >= 2)
-         {
-            file = args[0];
-            int.TryParse(args[1], out line);
-         }
-      }
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Sets a temporary breakpoint at the target line and resumes.
-      /// </summary>
-      // ------------------------------------------------------------
-      private static string HandleUntil
-      (
-         DebugContext context, List<string> args
-      )
-      {
          if (!context.Session.IsSuspended)
          {
             return IpcResponse.Error
@@ -451,11 +381,11 @@ namespace MonoDebug
       /// Sets the instruction pointer on the current thread.
       /// </summary>
       // ------------------------------------------------------------
-      private static string HandleGoto
-      (
-         DebugContext context, List<string> args
-      )
+      [CLICommand("flow", "goto", description = "Set instruction pointer")]
+      public static string HandleGoto(CommandArgs args)
       {
+         var context = DebugContext.Current;
+
          if (!context.Session.IsSuspended)
          {
             return IpcResponse.Error
@@ -499,8 +429,11 @@ namespace MonoDebug
       /// Suspends VM execution.
       /// </summary>
       // ------------------------------------------------------------
-      private static string HandlePause(DebugContext context)
+      [CLICommand("flow", "pause", description = "Suspend execution")]
+      public static string HandlePause(CommandArgs args)
       {
+         var context = DebugContext.Current;
+
          context.Session.Suspend();
 
          if (context.Session.StoppedThread != null)
@@ -563,6 +496,34 @@ namespace MonoDebug
             Constants.Error.ConnectFailed,
             "Failed to reconnect after domain reload."
          ).RawJson;
+      }
+
+   #endregion
+
+   #region Helpers
+
+      // ------------------------------------------------------------
+      /// <summary>
+      /// Parses [file] line from positional args.
+      /// </summary>
+      // ------------------------------------------------------------
+      private static void ParseFileLine
+      (
+         CommandArgs args, out string file, out int line
+      )
+      {
+         file = "";
+         line = 0;
+
+         if (args.Count == 1)
+         {
+            int.TryParse(args[0], out line);
+         }
+         else if (args.Count >= 2)
+         {
+            file = args[0];
+            int.TryParse(args[1], out line);
+         }
       }
 
    #endregion

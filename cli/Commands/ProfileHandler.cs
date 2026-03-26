@@ -2,10 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Text.Json;
 
 using InoIPC;
+
+using InoCLI;
 
 namespace MonoDebug
 {
@@ -18,96 +18,26 @@ namespace MonoDebug
    static class ProfileHandler
    {
 
-   #region Dispatch
-
-      // ------------------------------------------------------------
-      /// <summary>
-      /// Dispatches a profile command and returns a JSON result.
-      /// </summary>
-      // ------------------------------------------------------------
-      public static string Handle
-      (
-         DebugContext context, List<string> args,
-         Dictionary<string, JsonElement> optionals
-      )
-      {
-         string command = args.Count > 0 ? args[0] : "";
-         var    rest    = args.Count > 1
-            ? args.GetRange(1, args.Count - 1)
-            : new List<string>();
-
-         switch (command)
-         {
-            case "create":
-            {
-               return Create(context, rest, optionals);
-            }
-
-            case "remove":
-            {
-               return Remove(context, rest);
-            }
-
-            case "edit":
-            {
-               return Edit(context, rest, optionals);
-            }
-
-            case "switch":
-            {
-               return Switch(context, rest);
-            }
-
-            case "enable":
-            {
-               return Enable(context, rest);
-            }
-
-            case "disable":
-            {
-               return Disable(context, rest, optionals);
-            }
-
-            case "list":
-            {
-               return ListAll(context);
-            }
-
-            case "info":
-            {
-               return Info(context, rest);
-            }
-
-            default:
-            {
-               return IpcResponse.Error
-               (
-                  Constants.Error.InvalidArgs,
-                  $"Unknown profile command: {command}"
-               ).RawJson;
-            }
-         }
-      }
-
-   #endregion
-
-   #region Commands
+   #region Create
 
       // ------------------------------------------------------------
       /// <summary>
       /// Creates a new profile with optional description.
       /// </summary>
       // ------------------------------------------------------------
-      private static string Create(DebugContext context, List<string> args, Dictionary<string, JsonElement> optionals)
+      [CLICommand("profile", "create", description = "Create profile")]
+      public static string Create(CommandArgs args)
       {
-         string name = args.Count > 0 ? args[0] : "";
+         var context = DebugContext.Current;
+
+         string name = args[0] ?? "";
 
          if (string.IsNullOrEmpty(name))
          {
             return IpcResponse.Error(Constants.Error.InvalidArgs, "Profile name required.").RawJson;
          }
 
-         string desc = optionals.GetString("desc");
+         string desc = args.Get("desc");
          var    prof = context.Profiles.Create(name, desc);
 
          if (prof == null)
@@ -118,22 +48,28 @@ namespace MonoDebug
          return IpcResponse.Success(new Dictionary<string, object> { ["profile"] = prof.ToDict() }).RawJson;
       }
 
+   #endregion
+
+   #region Remove
+
       // ------------------------------------------------------------
       /// <summary>
       /// Removes a profile and cascade-deletes its breakpoints and
       /// catchpoints.
       /// </summary>
       // ------------------------------------------------------------
-      private static string Remove(DebugContext context, List<string> args)
+      [CLICommand("profile", "remove", description = "Remove profile")]
+      public static string Remove(CommandArgs args)
       {
-         string name = args.Count > 0 ? args[0] : "";
+         var context = DebugContext.Current;
+
+         string name = args[0] ?? "";
 
          if (string.IsNullOrEmpty(name))
          {
             return IpcResponse.Error(Constants.Error.InvalidArgs, "Profile name required.").RawJson;
          }
 
-         // Profile owns its points; removal cascades via ProfileCollection
          var profile = context.Profiles.Get(name);
 
          if (profile != null)
@@ -150,16 +86,23 @@ namespace MonoDebug
          return IpcResponse.Success($"Removed profile '{name}' and its breakpoints.").RawJson;
       }
 
+   #endregion
+
+   #region Edit
+
       // ------------------------------------------------------------
       /// <summary>
       /// Edits a profile's description or name.
       /// </summary>
       // ------------------------------------------------------------
-      private static string Edit(DebugContext context, List<string> args, Dictionary<string, JsonElement> optionals)
+      [CLICommand("profile", "edit", description = "Edit profile")]
+      public static string Edit(CommandArgs args)
       {
-         string name   = args.Count > 0 ? args[0] : "";
-         string desc   = optionals.GetString("desc");
-         string rename = optionals.GetString("rename");
+         var context = DebugContext.Current;
+
+         string name   = args[0] ?? "";
+         string desc   = args.Get("desc");
+         string rename = args.Get("rename");
 
          var prof = context.Profiles.Edit(name, desc, rename);
 
@@ -173,15 +116,22 @@ namespace MonoDebug
          return IpcResponse.Success(new Dictionary<string, object> { ["profile"] = prof.ToDict() }).RawJson;
       }
 
+   #endregion
+
+   #region Switch
+
       // ------------------------------------------------------------
       /// <summary>
       /// Switches to a profile: activates it, deactivates all
       /// others.
       /// </summary>
       // ------------------------------------------------------------
-      private static string Switch(DebugContext context, List<string> args)
+      [CLICommand("profile", "switch", description = "Switch active profile")]
+      public static string Switch(CommandArgs args)
       {
-         string name = args.Count > 0 ? args[0] : "";
+         var context = DebugContext.Current;
+
+         string name = args[0] ?? "";
 
          if (!context.Profiles.Exists(name))
          {
@@ -193,14 +143,21 @@ namespace MonoDebug
          return IpcResponse.Success($"Switched to profile '{name}'.").RawJson;
       }
 
+   #endregion
+
+   #region Enable
+
       // ------------------------------------------------------------
       /// <summary>
       /// Enables a profile without affecting others.
       /// </summary>
       // ------------------------------------------------------------
-      private static string Enable(DebugContext context, List<string> args)
+      [CLICommand("profile", "enable", description = "Enable profile")]
+      public static string Enable(CommandArgs args)
       {
-         string name = args.Count > 0 ? args[0] : "";
+         var context = DebugContext.Current;
+
+         string name = args[0] ?? "";
 
          if (!context.Profiles.Exists(name))
          {
@@ -216,21 +173,28 @@ namespace MonoDebug
          return IpcResponse.Success($"Enabled profile '{name}'.").RawJson;
       }
 
+   #endregion
+
+   #region Disable
+
       // ------------------------------------------------------------
       /// <summary>
       /// Disables a profile or all profiles.
       /// </summary>
       // ------------------------------------------------------------
-      private static string Disable(DebugContext context, List<string> args, Dictionary<string, JsonElement> optionals)
+      [CLICommand("profile", "disable", description = "Disable profile")]
+      public static string Disable(CommandArgs args)
       {
-         if (optionals.Has("all"))
+         var context = DebugContext.Current;
+
+         if (args.Has("all"))
          {
             context.Profiles.DisableAll();
             ApplyProfileState(context);
             return IpcResponse.Success("Disabled all profiles.").RawJson;
          }
 
-         string name = args.Count > 0 ? args[0] : "";
+         string name = args[0] ?? "";
 
          if (!context.Profiles.Exists(name))
          {
@@ -246,13 +210,20 @@ namespace MonoDebug
          return IpcResponse.Success($"Disabled profile '{name}'.").RawJson;
       }
 
+   #endregion
+
+   #region List
+
       // ------------------------------------------------------------
       /// <summary>
       /// Lists all profiles with breakpoint and catchpoint counts.
       /// </summary>
       // ------------------------------------------------------------
-      private static string ListAll(DebugContext context)
+      [CLICommand("profile", "list", description = "List profiles")]
+      public static string ListAll(CommandArgs args)
       {
+         var context = DebugContext.Current;
+
          var list = context.Profiles.List().Select(p =>
          {
             var dict = p.ToDict();
@@ -264,14 +235,23 @@ namespace MonoDebug
          return IpcResponse.Success(new Dictionary<string, object> { ["profiles"] = list }).RawJson;
       }
 
+   #endregion
+
+   #region Info
+
       // ------------------------------------------------------------
       /// <summary>
       /// Shows profile detail with its breakpoints and catchpoints.
       /// </summary>
       // ------------------------------------------------------------
-      private static string Info(DebugContext context, List<string> args)
+      [CLICommand("profile", "info", description = "Profile details")]
+      public static string Info(CommandArgs args)
       {
-         if (args.Count == 0)
+         var context = DebugContext.Current;
+
+         string name = args[0];
+
+         if (string.IsNullOrEmpty(name))
          {
             return IpcResponse.Error
             (
@@ -279,8 +259,7 @@ namespace MonoDebug
             ).RawJson;
          }
 
-         string name = args[0];
-         var    prof = context.Profiles.Get(name);
+         var prof = context.Profiles.Get(name);
 
          if (prof == null)
          {
@@ -319,7 +298,6 @@ namespace MonoDebug
          {
             bool active = profile.Active;
 
-            // Apply to breakpoints
             foreach (var bp in profile.BreakPoints.Values)
             {
                if (active && !bp.Enabled)
@@ -332,7 +310,6 @@ namespace MonoDebug
                }
             }
 
-            // Apply to catchpoints
             foreach (var cp in profile.CatchPoints.Values)
             {
                if (active && !cp.Enabled)

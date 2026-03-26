@@ -43,7 +43,6 @@ cli/
     ├── DebugContext.cs           공유 컨텍스트 (Session + Profiles)
     ├── DebugDaemon.cs            Named Pipe 서버 + 디스패치
     ├── Constants.cs              공유 상수 + 에러 코드
-    ├── OptionExtensions.cs       Optionals/args 헬퍼
     ├── DebugPoint/
     │   ├── DebugPoint.cs         추상 베이스
     │   ├── BreakPoint.cs         위치 브레이크포인트
@@ -229,7 +228,7 @@ dotnet test test/MonoDebug.TEST.csproj
 |--------|------|---------|
 | [mono/debugger-libs](https://github.com/mono/debugger-libs) | Mono.Debugger.Soft + Mono.Debugging.Soft (SDB + Roslyn 평가) | MIT |
 | [Mono.Cecil](https://www.nuget.org/packages/Mono.Cecil) | 어셈블리 메타데이터 (런타임 의존성) | MIT |
-| [InoCLI](https://github.com/inonego/InoCLI) | CLI 인자 파서 | MIT |
+| [InoCLI](https://github.com/inonego/InoCLI) | CLI 프레임워크 (파서 + 커맨드 레지스트리) | MIT |
 | [InoIPC](https://github.com/inonego/InoIPC) | IPC 전송 + 프레임 프로토콜 | MIT |
 
 ## 라이선스

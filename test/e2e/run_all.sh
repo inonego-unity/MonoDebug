@@ -37,7 +37,7 @@ echo "======== C. BREAK ========"
 run break set "$SCRIPT" 14; check "C1 set" '"success":true'
 run break set "$SCRIPT" 14; check "C2 duplicate BP" '"success":true'
 run break set "$SCRIPT" 19 --temp; check "C3 set --temp" '"isTemp":true'
-run break DebugTest.cs 14; check "C4 no set" 'Unknown break command'
+run break DebugTest.cs 14; check "C4 no set" 'Unknown command'
 run break set; check "C5 no args" 'INVALID_ARGS'
 run break list; check "C6 list" '"breakpoints":'
 run break disable 4; check "C7 disable" 'Disabled'
@@ -50,7 +50,7 @@ run break set "$SCRIPT" 14; check "C13 re-set" '"success":true'
 
 echo "======== D. CATCH + ISOLATION ========"
 run catch set NullReferenceException; check "D1 set" '"success":true'
-run catch NullReferenceException; check "D2 no set" 'Unknown catch command'
+run catch NullReferenceException; check "D2 no set" 'Unknown command'
 run catch list; check "D3 list" '"catchpoints":'
 run catch remove --all; check "D4 remove --all" 'Removed'
 run break list; check "D5 BP survived" '"breakpoints":'
@@ -136,11 +136,11 @@ run profile disable --all; check "I9 disable --all" 'Disabled all'
 run profile enable default; check "I10 enable" 'Enabled'
 run profile remove test-v2; check "I11 remove" 'Removed'
 run profile remove default; check "I12 remove default" 'Cannot remove'
-run profile foo; check "I13 unknown" 'Unknown profile command'
+run profile foo; check "I13 unknown" 'Unknown command'
 
 echo "======== J. ERRORS ========"
-run flow xyz; check "J1 unknown flow" 'Unknown flow command'
-run foobar; check "J2 unknown group" 'Unknown command group'
+run flow xyz; check "J1 unknown flow" 'Unknown command'
+run foobar; check "J2 unknown group" 'Unknown command'
 run eval; check "J3 eval no expr" 'INVALID_ARGS'
 
 echo "======== L. DETACH ========"
